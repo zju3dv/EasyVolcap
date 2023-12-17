@@ -46,7 +46,7 @@ cat requirements.txt | sed -e '/^\s*#.*$/d' -e '/^\s*$/d' | xargs -n 1 pip insta
 pip install -e . --no-build-isolation --no-deps
 ```
 
-We opted to use the lastest `pyproject.toml` style packing system for exposing commandline interfaces.
+We opted to use the latest `pyproject.toml` style packing system for exposing commandline interfaces.
 It creates a virtual environment for building dependencies by default, which could be quite slow. Disabled with `--no-build-isolation`.
 You should create a `conda` or `mamba` (recommended) environment for development, and install the dependencies manually.
 If existing environment with `PyTorch` installed can be utilized, you can jump straight to installing the `pip` dependencies.
