@@ -112,7 +112,7 @@ def parse_cfg(args):
         return cfg
     elif not args.config:  # ''
         # Default config object
-        return
+        return cfg
     else:
         raise FileNotFoundError(f"Config file {args.config} not found")
         # raise FileNotFoundError(f"Config file {markup_to_ansi(blue(args.config))} not found")
