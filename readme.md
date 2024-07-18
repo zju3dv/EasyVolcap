@@ -395,7 +395,10 @@ We would like to acknowledge the following inspiring prior work:
 ***EasyVolcap***'s license can be found [here](license).
 
 Note that the license of the algorithms or other components implemented in ***EasyVolcap*** might be different from the license of ***EasyVolcap*** itself. You will have to install their respective modules to use them in ***EasyVolcap*** following the guide in the [installation section](#installation).
-Please refer to their respective licensing terms if you're planning on using them.
+
+Please refer to their respective licensing terms if you're planning on using them. For example, ***EasyVolcap***'s [own implementation of the hash embedding module](easyvolcap/models/networks/embedders/hash_embedder.py) is under the same license as ***EasyVolcap***. However, the imported `tiny-cuda-nn` package in the importing implementation is under the same license as the original Instant-NGP paper.
+
+All imported modules (as specified in the [requirement files](requirements.txt) or in the source code itself) are under their respective licenses. Please refer to their respective repositories for more information.
 
 ## Citation
 

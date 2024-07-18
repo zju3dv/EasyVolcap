@@ -1,0 +1,1 @@
+The configuration and register system is a modified version of [XRNeRF](https://github.com/openxrlab/xrnerf)'s, thus this part of the code is under the same license as XRNeRF.
