@@ -273,7 +273,7 @@ class CameraPath:
         R = w2c[:3, :3]
         T = w2c[:3, 3:]
 
-        return H, W, K, R, T, n, f, t, v, bounds
+        return Camera(H, W, K, R, T, n, f, t, v, bounds)
 
     def export_keyframes(self, path: str):
         # Store keyframes to path
@@ -311,7 +311,7 @@ class CameraPath:
 
         imgui.push_item_width(slider_width * 0.5)
         self.name = imgui.input_text(f'Mesh name##{i}', self.name)[1]
-        self.n_render_views = imgui.slider_int(f'Plot samples##{i}', self.n_render_views, 0, 3000)[1]
+        self.n_render_views = imgui.slider_int(f'Plot samples##{i}', self.n_render_views, 1, 3000)[1]
         self.plot_thickness = imgui.slider_float(f'Plot thickness##{i}', self.plot_thickness, 0.01, 10.0)[1]
         self.camera_thickness = imgui.slider_float(f'Camera thickness##{i}', self.camera_thickness, 0.01, 10.0)[1]
         self.camera_axis_size = imgui.slider_float(f'Camera axis size##{i}', self.camera_axis_size, 0.01, 1.0)[1]
@@ -424,7 +424,7 @@ class Camera:
                  pause_physics: bool = False,
 
                  batch: dotdict = None,  # will ignore all other inputs
-                 string: str = None,  # will ignore all other inputs
+                 string: Optional[str] = None,  # will ignore all other inputs
                  **kwargs,
                  ) -> None:
 
@@ -433,7 +433,11 @@ class Camera:
             if batch is None:
                 batch = dotdict()
                 batch.H, batch.W, batch.K, batch.R, batch.T, batch.n, batch.f, batch.t, batch.v, batch.bounds = H, W, K, R, T, n, f, t, v, bounds
-            batch = to_tensor(batch, ignore_list=True)
+            batch = to_tensor(batch, non_recursive_list=True)
+            batch.K = batch.K.view(3, 3)
+            batch.R = batch.R.view(3, 3)
+            batch.T = batch.T.view(3, 1)
+            # batch.D = batch.D.view(5, 1)
             self.from_batch(batch)
 
             # Other configurables
@@ -711,7 +715,7 @@ class Camera:
         if self.is_dragging:
             self.drag_start_center += movement
 
-    def to_batch(self):
+    def to_batch(self, is_dataset: bool = False):
         meta = dotdict()
         meta.H = torch.as_tensor(self.H)
         meta.W = torch.as_tensor(self.W)
@@ -724,19 +728,19 @@ class Camera:
         meta.v = torch.as_tensor(self.v, dtype=torch.float)
         meta.bounds = torch.as_tensor(self.bounds.to_list(), dtype=torch.float)  # no transpose for bounds
 
-        # GUI related elements
-        meta.mass = torch.as_tensor(self.mass, dtype=torch.float)
-        meta.moment_of_inertia = torch.as_tensor(self.moment_of_inertia, dtype=torch.float)
-        meta.movement_force = torch.as_tensor(self.movement_force, dtype=torch.float)
-        meta.movement_torque = torch.as_tensor(self.movement_torque, dtype=torch.float)
-        meta.movement_speed = torch.as_tensor(self.movement_speed, dtype=torch.float)
-        meta.origin = torch.as_tensor(self.origin.to_list(), dtype=torch.float)
-        meta.world_up = torch.as_tensor(self.world_up.to_list(), dtype=torch.float)
+        if not is_dataset:
+            # GUI related elements
+            meta.mass = torch.as_tensor(self.mass, dtype=torch.float)
+            meta.moment_of_inertia = torch.as_tensor(self.moment_of_inertia, dtype=torch.float)
+            meta.movement_force = torch.as_tensor(self.movement_force, dtype=torch.float)
+            meta.movement_torque = torch.as_tensor(self.movement_torque, dtype=torch.float)
+            meta.movement_speed = torch.as_tensor(self.movement_speed, dtype=torch.float)
+            meta.origin = torch.as_tensor(self.origin.to_list(), dtype=torch.float)
+            meta.world_up = torch.as_tensor(self.world_up.to_list(), dtype=torch.float)
 
-        batch = dotdict()
-        batch.update(meta)
-        batch.meta.update(meta)
-        return batch
+        output = dotdict(meta)  # will copy
+        output.meta = meta
+        return output
 
     def to_easymocap(self):
         batch = self.to_batch()
@@ -753,7 +757,7 @@ class Camera:
         return json.dumps(batch)
 
     def from_string(self, string: str):
-        batch = to_tensor(dotdict(json.loads(string)), ignore_list=True)
+        batch = to_tensor(dotdict(json.loads(string)), non_recursive_list=True)
         self.from_batch(batch)
 
     def from_batch(self, batch: dotdict):

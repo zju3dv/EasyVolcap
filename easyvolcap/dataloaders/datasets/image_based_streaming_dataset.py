@@ -93,15 +93,20 @@ class ImageBasedStreamingDataset(ImageBasedDataset):
         # Open all webcams
         self.streams = MultiWebcamUSB(cam_cfgs=self.stream_cfgs.cam_cfgs,
                                       save_dir=self.stream_cfgs.save_dir,
-                                      save_tag=self.stream_cfgs.save_tag)
+                                      save_tag=self.stream_cfgs.save_tag,
+                                      view_inds=self.view_inds.tolist())
 
     def get_sources(self,
                     latent_index: Union[List[int], int], view_index: Union[List[int], int],
                     output: dotdict):
         # Get image from the stream
-        imgs = self.streams.capture(save=self.save_images)
-        imgs = [to_tensor(imgs[i] / 255.) for i in view_index]  # (S, H, W, 3)
-        return imgs
+        rgbs = self.streams.capture(save=self.save_images)
+        rgbs = [to_tensor(rgbs[i] / 255.0).permute(2, 0, 1) for i in view_index]  # (S, H, W, 3)
+        output.src_inps = rgbs
+        return output
 
     def get_viewer_batch(self, output: dotdict):
-        return ImageBasedDataset.get_viewer_batch(self, output)
+        output = ImageBasedDataset.get_viewer_batch(self, output)
+        output.stream = True
+        output.meta.stream = True
+        return output

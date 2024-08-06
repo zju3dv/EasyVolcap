@@ -8,7 +8,7 @@ import trimesh
 from os.path import join, exists, dirname
 
 from easyvolcap.utils.console_utils import *
-from easymocap.mytools.camera_utils import read_cameras
+from easyvolcap.utils.camera_utils import read_cameras
 from easymocap.visualize.render_func import get_render_func
 
 

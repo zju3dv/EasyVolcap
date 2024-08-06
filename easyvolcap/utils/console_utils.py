@@ -271,6 +271,7 @@ def green(string: str) -> str: return f'[green bold]{string}[/]'
 def yellow(string: str) -> str: return f'[yellow bold]{string}[/]'
 def magenta(string: str) -> str: return f'[magenta bold]{string}[/]'
 def color(string: str, color: str): return f'[{color} bold]{string}[/]'
+def bold(string: str): return f'[bold]{string}[/]'
 
 
 def red_slim(string: str) -> str: return f'[red]{string}[/]'
@@ -281,9 +282,10 @@ def green_slim(string: str) -> str: return f'[green]{string}[/]'
 def yellow_slim(string: str) -> str: return f'[yellow]{string}[/]'
 def magenta_slim(string: str) -> str: return f'[magenta]{string}[/]'
 def color_slim(string: str, color: str): return f'[{color}]{string}[/]'
+def slim(string: str): return f'{string}'
 
 
-def markup_to_ansi(string: str) -> str:
+def markup_to_ansi(string: str, end='') -> str:
     """
     Convert rich-style markup to ANSI sequences for command-line formatting.
 
@@ -294,7 +296,7 @@ def markup_to_ansi(string: str) -> str:
         Text formatted via ANSI sequences.
     """
     with console.capture() as out:
-        console.print(string, soft_wrap=True)
+        console.print(string, soft_wrap=True, end=end)
     return out.get()
 
 
@@ -670,7 +672,7 @@ class Timer:
         last = self.event_last.get(event, 0)
         denom = self.event_denom.get(event, 0)
 
-        if (curr - last) > log_interval:  # if this is true, will never have printed
+        if (curr - last) > log_interval and log_interval > 0:  # if this is true, will never have printed
             log(f"{(acc + diff) / (denom + 1) * 1000:8.3f} ms", event, back=3)
             self.event_acc[event] = 0
             self.event_denom[event] = 0
@@ -714,6 +716,7 @@ def display_table(states: dotdict,
                           'loss': 'magenta',
                           'data': 'blue',
                           'batch': 'blue',
+                          'g_ratio': 'green',
                       }
                   ),
                   maxlen=5,
@@ -773,17 +776,26 @@ def build_parser(d: dict, parser: argparse.ArgumentParser = None, **kwargs):
                 d = v.pop('default')
                 t = v.pop('type', type(d))
                 # h = v.pop('help', markup_to_ansi(help_pattern.format(d)))
-                h = (v.pop('help') + '; ' + markup_to_ansi(help_pattern.format(d))) if 'help' in v else markup_to_ansi(help_pattern.format(d))
+                h = f'{markup_to_ansi(help_pattern.format(d))}; {v.pop("help")}' if 'help' in v else markup_to_ansi(help_pattern.format(d))
                 parser.add_argument(f'--{k}', default=d, type=t, help=h, **v)
             else:
                 # TODO: Add argparse group here
-                pass
+                parser.add_argument(f'--{k}', **v)
+
         elif isinstance(v, list):
             parser.add_argument(f'--{k}', type=type(v[0]) if len(v) else str, default=v, nargs='+', help=markup_to_ansi(help_pattern.format(v)))
         elif isinstance(v, bool):
             t = 'no_' + k if v else k
-            parser.add_argument(f'--{t}', action='store_false' if v else 'store_true', dest=k, help=markup_to_ansi(help_pattern.format(v)))
+            parser.add_argument(f'--{t}', action='store_false' if v else 'store_true', dest=k, help=markup_to_ansi(help_pattern.format(False)))
         else:
             parser.add_argument(f'--{k}', type=type(v), default=v, help=markup_to_ansi(help_pattern.format(v)))
 
     return parser
+
+
+def warn_once(message: str):
+    if not hasattr(warn_once, 'warned'):
+        warn_once.warned = set()
+    if message not in warn_once.warned:
+        log(yellow(message))
+        warn_once.warned.add(message)

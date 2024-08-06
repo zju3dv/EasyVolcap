@@ -1,9 +1,10 @@
 import cv2
 import torch
 import trimesh
+import mcubes
 import numpy as np
-import open3d as o3d
 import torch.nn.functional as F
+import torchvision.transforms.functional as TF
 
 from PIL import Image
 from plyfile import PlyData, PlyElement
@@ -16,6 +17,8 @@ from easyvolcap.utils.tsdf_utils import TSDF, TSDFFuser
 
 
 def voxel_reconstruction(pcd: torch.Tensor, voxel_size: float = 0.01):
+    import open3d as o3d
+
     if isinstance(pcd, np.ndarray): pcd = torch.from_numpy(pcd)  # for a consistent api
 
     # Convert torch tensor to Open3D PointCloud
@@ -42,7 +45,7 @@ def voxel_reconstruction(pcd: torch.Tensor, voxel_size: float = 0.01):
 def filter_global_points(points: dotdict[str, torch.Tensor]):
     from easyvolcap.utils.fcds_utils import remove_outlier
 
-    def gather_from_inds(ind: torch.Tensor, scalars: dotdict()):
+    def gather_from_inds(ind: torch.Tensor, scalars: dotdict):
         return dotdict({k: multi_gather(v, ind[..., None]) for k, v in scalars.items()})
 
     # Remove NaNs in point positions
@@ -622,6 +625,7 @@ class Open3DFuser(DepthFuser):
         fuse_color=False,
         use_upsample_depth=False,
     ):
+        import open3d as o3d
         super().__init__(
             gt_path,
             fusion_resolution,
@@ -647,6 +651,7 @@ class Open3DFuser(DepthFuser):
         cam_T_world_b44,
         color_b3hw,
     ):
+        import open3d as o3d
 
         width = depths_b1hw.shape[-1]
         height = depths_b1hw.shape[-2]
@@ -702,6 +707,7 @@ class Open3DFuser(DepthFuser):
             )
 
     def export_mesh(self, path, use_marching_cubes_mask=None):
+        import open3d as o3d
         o3d.io.write_triangle_mesh(path, self.volume.extract_triangle_mesh())
 
     def get_mesh(self, export_single_mesh=None, convert_to_trimesh=False):
@@ -711,34 +717,3 @@ class Open3DFuser(DepthFuser):
             mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.triangles)
 
         return mesh
-
-
-def get_fuser(opts, scan):
-    """Returns the depth fuser required. Our fuser doesn't allow for """
-
-    if opts.dataset == "scannet":
-        gt_path = ScannetDataset.get_gt_mesh_path(opts.dataset_path,
-                                                  opts.split, scan)
-    else:
-        gt_path = None
-
-    if opts.depth_fuser == "ours":
-        if opts.fuse_color:
-            print("WARNING: fusing color using 'ours' fuser is not supported, "
-                  "Color will not be fused.")
-
-        return OurFuser(
-            gt_path=gt_path,
-            fusion_resolution=opts.fusion_resolution,
-            max_fusion_depth=opts.fusion_max_depth,
-            fuse_color=False,
-        )
-    if opts.depth_fuser == "open3d":
-        return Open3DFuser(
-            gt_path=gt_path,
-            fusion_resolution=opts.fusion_resolution,
-            max_fusion_depth=opts.fusion_max_depth,
-            fuse_color=opts.fuse_color,
-        )
-    else:
-        raise ValueError("Unrecognized fuser!")

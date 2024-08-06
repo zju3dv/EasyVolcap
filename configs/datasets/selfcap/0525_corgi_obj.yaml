@@ -1,0 +1,9 @@
+configs: configs/datasets/selfcap/0525_corgi.yaml
+
+dataloader_cfg: &dataloader_cfg
+    dataset_cfg: &dataset_cfg # ratio: 0.5
+        bounds: [[-1.0629, -1.5931, 0.8483], [5.4231, 1.5700, 5.9504]] # for controlling the learning rate
+
+val_dataloader_cfg:
+    dataset_cfg:
+        <<: *dataset_cfg

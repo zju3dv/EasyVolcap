@@ -9,13 +9,13 @@ from glob import glob
 
 @catch_throw
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--input', default='data/trained_model')
-    parser.add_argument('--ext', default='.pt')
-    parser.add_argument('--count', default=3, type=int)
-    parser.add_argument('--remove_only_if_contains', default='latest.pt')
-    parser.add_argument('--skip', default=['training_r4'], nargs='*')
-    args = parser.parse_args()
+    args = dotdict()
+    args.input = dotdict(default='data/trained_model')
+    args.ext = dotdict(default='.pt')
+    args.count = dotdict(default=3, type=int)
+    args.remove_only_if_contains = dotdict(default='latest.pt')
+    args.skip = dotdict(default=['training_r4'], nargs='*')
+    args = dotdict(vars(build_parser(args, description=__doc__).parse_args()))
 
     to_remove_all = []
     for exp in os.listdir(args.input):

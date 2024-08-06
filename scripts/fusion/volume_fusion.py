@@ -29,21 +29,21 @@ def main():
     import sys
     sys.path.append('.')
 
-    sep_ind = sys.argv.index('--') if '--' in sys.argv else 0
+    sep_ind = sys.argv.index('--') if '--' in sys.argv else len(sys.argv)
     our_args = sys.argv[1:sep_ind]
-    evv_args = sys.argv[sep_ind + 1:]
-    sys.argv = [sys.argv[0]] + ['-t', 'test'] + evv_args + ['configs=configs/specs/vis.yaml', 'val_dataloader_cfg.dataset_cfg.skip_loading_images=False', 'model_cfg.apply_optcam=True']
+    evc_args = sys.argv[sep_ind + 1:]
+    sys.argv = [sys.argv[0]] + ['-t', 'test'] + evc_args + ['configs=configs/specs/vis.yaml', 'val_dataloader_cfg.dataset_cfg.disk_dataset=False', 'model_cfg.apply_optcam=True']
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--result_dir', type=str, default='data/geometry')
-    parser.add_argument('--n_srcs', type=int, default=4, help='Number of source views to use for the fusion process')
-    parser.add_argument('--occ_mult', type=float, default=0.2, help='Multiply the predicted transparency by this value due to overlap')
-    parser.add_argument('--msk_abs_thresh', type=float, default=0.5, help='If mask exists, filter points with too low a mask value')
-    parser.add_argument('--geo_abs_thresh', type=float, default=2.0, help='The threshold for MSE in reprojection, unit: squared pixels') # aiming for a denser reconstruction
-    parser.add_argument('--geo_rel_thresh', type=float, default=0.05, help='The difference in relative depth values, unit: one')
-    parser.add_argument('--skip_depth_consistency', action='store_true')
-    parser.add_argument('--skip_align_with_camera', action='store_true')
-    args = parser.parse_args(our_args)
+    args = dotdict(
+        result_dir=dotdict(type=str, default='data/geometry'),
+        n_srcs=dotdict(type=int, default=4, help='Number of source views to use for the fusion process'),
+        occ_mult=dotdict(type=float, default=0.2, help='Multiply the predicted transparency by this value due to overlap'),
+        msk_abs_thresh=dotdict(type=float, default=0.5, help='If mask exists, filter points with too low a mask value'),
+        geo_abs_thresh=dotdict(type=float, default=2.0, help='The threshold for MSE in reprojection, unit: squared pixels'), # aiming for a denser reconstruction
+        geo_rel_thresh=dotdict(type=float, default=0.05, help='The difference in relative depth values, unit: one'),
+        skip_depth_consistency=False,
+    )
+    args = dotdict(vars(build_parser(args, description=__doc__).parse_args(our_args)))
 
     # Entry point first, other modules later to avoid strange import errors
     from easyvolcap.scripts.main import test # will do everything a normal user would do

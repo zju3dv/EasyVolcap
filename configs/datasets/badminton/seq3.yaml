@@ -1,0 +1,59 @@
+dataloader_cfg: # we see the term "dataloader" as one word?
+    dataset_cfg: &dataset_cfg
+        data_root: data/badminton/seq3
+        masks_dir: bgmtv2
+        bounds: [[-3.5, -6.7, -4.0], [7.5, 9.2, 0.45]]
+        view_sample: [0, null, 1] # use all views
+        frame_sample: [0, 500, 1] # only train for 200 frames
+
+        vhull_voxel_size: 0.003
+        intersect_camera_bounds: False
+        # vhull_thresh: 0.95
+        # count_thresh: 16
+
+        # Should refactor VolumetricVideoDataset to support zero weight in non-masked regions
+        # bkgd_weight: 0.0
+        # avg_using_all: True
+        # avg_max_count: 50 # should match inference with this
+
+        # use_masks: True
+        # masks_dir: inv_maskes # for the scene
+        # dist_opt_K: True # useful for large distortion values
+        near: 0.1
+        far: 20.0
+
+val_dataloader_cfg:
+    dataset_cfg:
+        <<: *dataset_cfg
+        view_sample: [0, null, 10] # one training, two testing
+        frame_sample: [0, null, 200] # one training, two testing
+
+viewer_cfg:
+    playing_fps: 50
+    window_size: [1080, 1920]
+    camera_cfg:
+        origin: [0.8365561962127686, -0.2532264292240143, 0.04289454594254494]
+        # world_up: [0, 0, -1] # negative of the y component of the rotation
+        world_up: [0.014027, 0.090914, -0.995760] # negative of the y component of the rotation
+        # prettier-ignore
+        K: [[1568.789130, 0.000000, 960.000000], [0.000000, 1571.591066, 540.000000], [0.000000, 0.000000, 1.000000]]
+        # prettier-ignore
+        R: [[0.888063, 0.456517, 0.054191], [-0.014027, -0.090914, 0.995760], [0.459508, -0.885058, -0.074334]]
+        # prettier-ignore
+        T: [-0.458918, 0.078427, 0.597564]
+        n: 0.5
+        f: 6.0
+# evc-test -c configs/base.yaml,configs/models/r4dv.yaml,configs/datasets/badminton/seq3_obj.yaml,configs/specs/vhulls.yaml val_dataloader_cfg.dataset_cfg.vhull_thresh=0.75 val_dataloader_cfg.dataset_cfg.count_thresh=6 val_dataloader_cfg.dataset_cfg.vhulls_dir=vhulls_g val_dataloader_cfg.dataset_cfg.reload_vhulls=True val_dataloader_cfg.dataset_cfg.frame_sample=90,91,1
+
+# evc-test -c configs/base.yaml,configs/models/r4dv.yaml,configs/datasets/badminton/seq3.yaml,configs/specs/vhulls.yaml val_dataloader_cfg.dataset_cfg.reload_vhulls=True val_dataloader_cfg.dataset_cfg.vhull_voxel_size=0.001
+# evc-test -c configs/base.yaml,configs/models/r4dv.yaml,configs/datasets/badminton/seq3.yaml,configs/specs/surfs.yaml
+# python scripts/reality_capture/dense_reconstruction.py --recopy_xmps --pcds_dir "C:/Users/AAA/Desktop/dense_xyzs_rc" --frame_sample 0 500 200 --data_root data/badminton/seq3
+
+# python scripts/points/ibr_colorization.py --data_root data/badminton/seq3 --input surfs18k_j10 --output surfs18k_j10 --frame_sample 0 500 10
+# python scripts/points/ibr_colorization.py --data_root data/badminton/seq3 --input surfs7k --output surfs7k --frame_sample 0 500 1
+
+# {"H":1080,"W":1920,"K":[[2566.73681640625,0.0,960.0],[0.0,2563.31982421875,540.0],[0.0,0.0,1.0]],"R":[[-0.826229453086853,0.5633337497711182,0.0],[-0.1273532509803772,-0.18678626418113708,0.9741355180740356],[0.5487633943557739,0.804859459400177,0.22607068717479706]],"T":[[0.8383246660232544],[0.022542357444763184],[2.7940902709960938]],"n":0.5,"f":6.0,"t":0.0,"v":0.0,"bounds":[[-8.0,-4.0,-1.0],[10.0,6.0,5.0]],"mass":0.10000000149011612,"moment_of_inertia":0.10000000149011612,"movement_force":1.0,"movement_torque":1.0,"movement_speed":1.0,"origin":[0.8365561962127686,-0.2532264292240143,0.04289454594254494],"world_up":[0.0,0.0,-1.0]}
+
+# {"H":1080,"W":1920,"K":[[1216.73681640625,0.0,960.0],[0.0,1215.117431640625,540.0],[0.0,0.0,1.0]],"R":[[-0.8511601090431213,0.5249061584472656,0.0],[-0.08109844475984573,-0.13150495290756226,0.9879946708679199],[0.5186044573783875,0.8409416079521179,0.1545008420944214]],"T":[[0.8062191009521484],[0.008099749684333801],[0.6115821003913879]],"n":0.5,"f":6.0,"t":0.0,"v":0.0,"bounds":[[-8.0,-4.0,-1.0],[10.0,6.0,5.0]],"mass":0.10000000149011612,"moment_of_inertia":0.10000000149011612,"movement_force":1.0,"movement_torque":1.0,"movement_speed":1.0,"origin":[0.8365561962127686,-0.2532264292240143,0.04289454594254494],"world_up":[0.0,0.0,-1.0]}
+
+# {"H":1080,"W":1920,"K":[[1569.4375,0.0,960.0],[0.0,1567.9122314453125,540.0],[0.0,0.0,1.0]],"R":[[-0.9162140488624573,0.4006893038749695,0.0],[0.05992348864674568,0.13702073693275452,0.9887537956237793],[0.3961830139160156,0.9059100151062012,-0.14955100417137146]],"T":[[0.6660770177841187],[0.1291079968214035],[0.7863659858703613]],"n":0.5,"f":6.0,"t":0.0,"v":0.0,"bounds":[[-8.0,-4.0,-1.0],[10.0,6.0,5.0]],"mass":0.10000000149011612,"moment_of_inertia":0.10000000149011612,"movement_force":1.0,"movement_torque":1.0,"movement_speed":1.0,"origin":[0.8365561962127686,-0.2532264292240143,0.04289454594254494],"world_up":[0.0,0.0,-1.0]}

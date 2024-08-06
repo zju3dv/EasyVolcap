@@ -11,4 +11,4 @@ val_dataloader_cfg:
         type: NoopDataset
         barebone: True
         use_vhulls: False
-        skip_loading_images: True
+        disk_dataset: True

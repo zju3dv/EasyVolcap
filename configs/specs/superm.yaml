@@ -10,4 +10,4 @@ val_dataloader_cfg:
     dataset_cfg:
         barebone: True
         use_vhulls: False
-        skip_loading_images: True
+        disk_dataset: True

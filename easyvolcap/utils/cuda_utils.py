@@ -6,7 +6,7 @@ def register_memory(x: torch.Tensor):
     The implementation of registering memory for fast HtoD copy is ultimately quite tricky due to the fact that
     some of the API for cuda and pytorch are not so robust on Windows (after an Windows 11 Insider update)
     Previously we used torch.cuda.cudart().cudaHostRegister and torch.cuda.cudart().cudaHostUnregister
-    Everything is breaking a part, emitting strange errors like FIND CuDNN for convolution & invalid arguments & etc.
+    Everything is breaking apart, emitting strange errors like FIND CuDNN for convolution & invalid arguments & etc.
 
     RuntimeError: CUDA error: invalid argument # ???
     RuntimeError: FIND was unable to find an engine to execute this computation # disable benchmarking

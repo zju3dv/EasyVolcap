@@ -27,7 +27,7 @@ def main(args):
         elif detect_model_format(args.colmap, ".txt"):
             ext = ".txt"
         else:
-            print("Provide model format: '.bin' or '.txt'")
+            log(red("Unable to find the COLMAP camera model. Provide model format: '.bin' or '.txt'"))
             return
 
     if ext == '.bin':
@@ -77,13 +77,14 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data_root', type=str, default='data/iphone/hdr_412')
-    parser.add_argument('--colmap', type=str, default='colmap/colmap_sparse/0')
-    parser.add_argument('--output', type=str, default='')
-    parser.add_argument('--sub', type=str, default='')  # only camera name containing this string will be saved
-    parser.add_argument('--scale', type=float, default=1.0)
-    args = parser.parse_args()
+    args = dotdict(
+        data_root='data/selfcap/0330_01/colmap',
+        colmap='colmap/colmap_sparse/0',
+        output='',
+        sub='',  # only camera name containing this string will be saved
+        scale=1.0,
+    )
+    args = dotdict(vars(build_parser(args, description=__doc__).parse_args()))
     args.colmap = join(args.data_root, args.colmap)
     args.output = join(args.data_root, args.output)
     main(args)

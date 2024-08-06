@@ -1,0 +1,51 @@
+# These are configs for training on longer sequences using the Temporal Gaussian Hierarchy method
+# Including initialization tuning, densification and opacity reset controlling
+# And a deeper hierarchy for easier management of GPU memory
+# Since we're training for long sequences, every bit of densification matter, thus it should never stop
+
+runner_cfg:
+    eval_ep: 25
+    save_latest_ep: 25
+    save_ep: 200
+    epochs: 800
+
+model_cfg:
+    network_cfg:
+        densify_through_all: True # will use all iterations for densification instead of doing extra pruning
+
+        # perframe_sparse_scale_t_mult: 3.0
+        # init_scale_t: 0.02785720156936238
+        # densify_grad_thresh: 0.0001
+        # perframe_sparse_scale_mult: 0.3
+        # segment_sparse_scale_mult: 0.3
+        # densify_from_iter: 833
+        # opacity_reset_interval: 40000
+        # densify_until_iter: 200000 # keep densifying
+        # extra_prune_until_iter: 200000 # keep densifying
+        # reset_opacity_max_level: 2
+        # init_points_mode: perframe_sparse+perframe_scale+segment_dense+segment_sparse
+        # init_points_mode: perframe_sparse+static_dense+perframe_scale+segment_dense
+        init_points_mode: perframe_sparse+static_dense+perframe_scale+segment_dense+segment_sparse
+        # init_points_mode: perframe_sparse+static_dense+perframe_scale
+        # init_points_mode: perframe_sparse+static_dense+perframe_scale+segment_dense
+        # init_points_mode: perframe_sparse+static_dense+perframe_scale+segment_dense
+        # init_points_mode: perframe_sparse+static_dense+perframe_scale+segment_dense
+        # init_points_mode: perframe_sparse+perframe_scale+segment_dense+segment_sparse
+        # init_points_mode: perframe_sparse+perframe_scale
+        points_dir:
+            # perframe_sparse: pcds_roma
+            # perframe_sparse: pcds_roma_3p_18k
+            perframe_sparse: pcds_roma_3p_7k
+            static_dense: dense_pcds_rc_180k/000000.ply
+            segment_sparse:
+                - pcds_roma_3p_18k_j10
+                # - pcds_roma_3p_96k_j100
+            # static_dense: dense_pcds_rc_180k/000000.ply
+            segment_dense: dense_pcds_rc_bbox_180k
+
+        # tfgs_cfg:
+        #     n_levels: 10
+        #     root_size: 40 # seconds
+
+        # sh_deg: 1
+        # sh_deg_t: 0

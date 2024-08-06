@@ -17,13 +17,40 @@ class BatchSampler(BatchSampler):
     def __init__(self,
                  sampler: Sampler,
                  batch_size: int = 8,
-                 drop_last: bool = False,
+                 drop_last: bool = False,  # when training, will use random sampler, this doesn't matter anymore
                  *arg,
                  **kwargs,
                  ):
         super().__init__(sampler,
                          batch_size,
                          drop_last)  # strange naming
+
+
+@DATASAMPLERS.register_module()
+class SameFrameBatchSampler(BatchSampler):
+    # This datasampler geneartes a new 'n_imgs' in keys passed into the dataset
+    # making sure all dataset instances across different processes returns the same number of
+    # source images for collating together a batched input, while maintaining the ability
+    # to introduce per-iter randomness in the number of images sampled
+    def __init__(self,
+                 sampler: Union[RandomSampler],
+                 batch_size: int = 8,
+                 drop_last: bool = False,
+                 ) -> None:
+        super().__init__(sampler, batch_size, drop_last)
+        dataset = sampler.dataset
+        self.nl = 1 if isinstance(dataset, VolumetricVideoInferenceDataset) else max(1, dataset.n_latents)
+        self.nv = len(dataset) // self.nl
+
+    def __iter__(self):
+        # Use shared number of images for batching
+        iterator = super().__iter__()
+        for batch in iterator:
+            # batch is now a index
+            view_index = [b // self.nl for b in batch]
+            frame = batch[0] % self.nl
+            batch = [frame + i * self.nl for i in view_index]
+            yield batch
 
 
 @DATASAMPLERS.register_module()
@@ -131,7 +158,7 @@ class IterationBasedRandomSampler(RandomSampler):
         for i in range(self.num_samples):
             if i < self.num_warmups:
                 # Randomly sample from range [0, n * i / self.num_warmups)
-                idx = random.choice(range(0, max(int(n * i / self.num_warmups), 3)))
+                idx = random.choice(range(0, min(max(int(n * i / self.num_warmups), 3), n)))
             else:
                 # Randomly sample from range [0, n)
                 idx = random.randrange(n)
@@ -147,6 +174,7 @@ class RandomSampler(RandomSampler):  # cannot use function here, recursion
                  view_sample: List[int] = [0, None, 1],
                  ith_latent: int = 0,
                  *arg, **kwargs):
+        self.dataset = dataset
         self.inds = get_inds(dataset, frame_sample, view_sample, ith_latent, *arg, **kwargs).ravel().numpy().tolist()
         super().__init__(data_source=self.inds)  # strange naming
 
@@ -162,6 +190,7 @@ class SequentialSampler(SequentialSampler):
                  view_sample: List[int] = [0, None, 1],
                  ith_latent: int = 0,
                  *arg, **kwargs):
+        self.dataset = dataset
         self.inds = get_inds(dataset, frame_sample, view_sample, ith_latent, *arg, **kwargs).ravel().numpy().tolist()
         super().__init__(data_source=self.inds)  # strange naming
 

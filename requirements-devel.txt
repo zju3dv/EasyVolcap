@@ -5,7 +5,8 @@
 # otherwise one single compilation error could eat away like 20 minutes for nothing.
 # pip install -e . --no-build-isolation --no-deps
 # Core dependencies
-torch # if you've used environment.yml, this will be a no-op
+# if you've used environment.yml, this will be a no-op
+torch 
 
 # other requirements
 # for terminal image visualization
@@ -79,7 +80,7 @@ detectron2 @ git+https://github.com/facebookresearch/detectron2
 dotmap
 # for easymocap loading of SMPL (maybe all pickle loading of SMPL?)
 chumpy
-mediapipe
+# mediapipe # strangely could not find this requirements
 func_timeout
 pycocotools
 tensorboardX
@@ -106,7 +107,6 @@ memory-tempfile
 glfw
 PyGLM
 pyperclip
-PyOpenGL
 clang-format
 imgui-bundle
 opencv-contrib-python
@@ -153,4 +153,4 @@ diff_mip_rasterization @ git+https://github.com/dendenxu/diff-mip-rasterization
 # TODO: Figure out a way to install taichi-nightly both from pip install -r and xargs
 # -i https://pypi.taichi.graphics/simple taichi-nightly
 # taichi-splatting # depends on nightly build of taichi, install later than that one
-gsplat
+gsplat @ git+https://github.com/dendenxu/gsplat # more aggressive numerical stability check for 4D

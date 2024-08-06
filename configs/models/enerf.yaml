@@ -35,6 +35,8 @@ val_dataloader_cfg:
         batch_size: 1 # test for one image for now, possibly oom
 
 runner_cfg:
+    visualizer_cfg:
+        types: ['RENDER', 'DEPTH', 'ALPHA']
     epochs: 400 # more than enough training for batch size of 2, surprisingly, 15 epochs already gives pretty good results
     record_images_to_tb: False # slow
     # train_use_amp: True # worse LPIPS

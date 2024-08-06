@@ -9,29 +9,36 @@ from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
 def profiler_step():
     if 'profiler' in globals():
-        with without_live():
-            profiler.step()
+        # with without_live():
+        profiler.step()
+        # log('[PROF] Profiler stepped')
 
 
 def profiler_start():
     if 'profiler' in globals():
-        with without_live():
-            profiler.start()
+        # with without_live():
+        profiler.start()
+        # log('[PROF] Profiler started')
 
 
 def profiler_stop():
     if 'profiler' in globals():
-        with without_live():
-            profiler.stop()
+        # with without_live():
+        profiler.stop()
+        # log('[PROF] Profiler stopped')
+
+
+def profiler_enabled():
+    return 'profiler' in globals()
 
 
 def setup_profiler(enabled=False,
                    clear_previous=True,
-                   skip_first=10,
+                   skip_first=5,
                    wait=5,
                    warmup=5,
-                   active=10,
-                   repeat=5,
+                   active=5,
+                   repeat=3,
                    record_dir=f"data/record/{cfg.exp_name}",  # constructed in the same way
                    record_shapes=True,
                    profile_memory=True,
@@ -40,9 +47,9 @@ def setup_profiler(enabled=False,
                    with_modules=True,
                    ):
     if enabled:
-        log(yellow(f"Profiling results will be saved to: {blue(record_dir)}"))
+        log(yellow(f"[PROF] Profiling results will be saved to: {blue(record_dir)}"))
         if clear_previous:
-            log(red(f'Removing profiling result in: {blue(record_dir)}'))
+            log(red(f'[PROF] Removing profiling result in: {blue(record_dir)}'))
             os.system(f'rm -rf {record_dir}')
         global profiler
         profiler = profile(schedule=schedule(skip_first=skip_first,
@@ -63,3 +70,4 @@ def setup_profiler(enabled=False,
         # # MARK: modification of global config, is this good?
         # cfg.runner_cfg.epoch = 1
         # cfg.runner_cfg.ep_iter = skip_first + repeat * (wait + warmup + active)
+        log('[PROF] Created profiler object')

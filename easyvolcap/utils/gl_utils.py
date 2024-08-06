@@ -20,6 +20,7 @@ from glm import vec2, vec3, vec4, mat3, mat4, mat4x3, mat2x3  # This is actually
 from easyvolcap.utils.console_utils import *
 from easyvolcap.utils.base_utils import dotdict
 from easyvolcap.utils.viewer_utils import Camera
+from easyvolcap.utils.timer_utils import timer
 from easyvolcap.utils.bound_utils import get_bounds
 from easyvolcap.utils.chunk_utils import multi_gather
 from easyvolcap.utils.color_utils import cm_cpu_store
@@ -355,9 +356,6 @@ class Mesh:
 
     def use_gl_program(self, program: shaders.ShaderProgram):
         use_gl_program(program)
-        self.uniforms.shade_flat = gl.glGetUniformLocation(program, "shade_flat")
-        self.uniforms.point_radius = gl.glGetUniformLocation(program, "point_radius")
-        self.uniforms.render_normal = gl.glGetUniformLocation(program, "render_normal")
         self.uniforms.H = gl.glGetUniformLocation(program, "H")
         self.uniforms.W = gl.glGetUniformLocation(program, "W")
         self.uniforms.n = gl.glGetUniformLocation(program, "n")
@@ -366,16 +364,22 @@ class Mesh:
         self.uniforms.K = gl.glGetUniformLocation(program, "K")
         self.uniforms.V = gl.glGetUniformLocation(program, "V")
         self.uniforms.M = gl.glGetUniformLocation(program, "M")
+        self.uniforms.VM = gl.glGetUniformLocation(program, "VM")
+        self.uniforms.focal = gl.glGetUniformLocation(program, "focal")
+        self.uniforms.principal = gl.glGetUniformLocation(program, "principal")
+        self.uniforms.basisViewport = gl.glGetUniformLocation(program, "basisViewport")
+
+        if hasattr(self, 'shade_flat'): self.uniforms.shade_flat = gl.glGetUniformLocation(program, "shade_flat")
+        if hasattr(self, 'point_radius'): self.uniforms.point_radius = gl.glGetUniformLocation(program, "point_radius")
+        if hasattr(self, 'render_normal'): self.uniforms.render_normal = gl.glGetUniformLocation(program, "render_normal")
 
     def upload_gl_uniforms(self, camera: Camera):
         K = camera.gl_ixt  # hold the reference
         V = camera.gl_ext  # hold the reference
         M = glm.identity(mat4)
-        P = K * V * M
+        VM = V * M
+        P = K * VM
 
-        gl.glUniform1i(self.uniforms.shade_flat, self.shade_flat)
-        gl.glUniform1f(self.uniforms.point_radius, self.point_radius)
-        gl.glUniform1i(self.uniforms.render_normal, self.render_normal)
         gl.glUniform1i(self.uniforms.H, camera.H)  # o2w
         gl.glUniform1i(self.uniforms.W, camera.W)  # o2w
         gl.glUniform1f(self.uniforms.n, camera.n)  # o2w
@@ -383,7 +387,15 @@ class Mesh:
         gl.glUniformMatrix4fv(self.uniforms.P, 1, gl.GL_FALSE, glm.value_ptr(P))  # o2clip
         gl.glUniformMatrix4fv(self.uniforms.K, 1, gl.GL_FALSE, glm.value_ptr(K))  # c2clip
         gl.glUniformMatrix4fv(self.uniforms.V, 1, gl.GL_FALSE, glm.value_ptr(V))  # w2c
-        gl.glUniformMatrix4fv(self.uniforms.M, 1, gl.GL_FALSE, glm.value_ptr(M))  # o2w
+        gl.glUniformMatrix4fv(self.uniforms.M, 1, gl.GL_FALSE, glm.value_ptr(M))  # m2w
+        gl.glUniformMatrix4fv(self.uniforms.VM, 1, gl.GL_FALSE, glm.value_ptr(VM))  # o2w
+        gl.glUniform2f(self.uniforms.focal, camera.K[0][0], camera.K[1][1])  # focal
+        gl.glUniform2f(self.uniforms.principal, camera.K[2][0], camera.K[2][1])  # focal
+        gl.glUniform2f(self.uniforms.basisViewport, 1 / camera.W, 1 / camera.H)  # focal
+
+        if hasattr(self, 'shade_flat'): gl.glUniform1i(self.uniforms.shade_flat, self.shade_flat)
+        if hasattr(self, 'point_radius'): gl.glUniform1f(self.uniforms.point_radius, self.point_radius)
+        if hasattr(self, 'render_normal'): gl.glUniform1i(self.uniforms.render_normal, self.render_normal)
 
     def update_gl_buffers(self):
         # Might be overwritten
@@ -404,9 +416,10 @@ class Mesh:
             self.init_gl_buffers(v, f)
 
     def init_gl_buffers(self, v: int = 0, f: int = 0):
+        element_size = self.verts.element_size() if hasattr(self, 'verts') else (4 if self.vert_gl_types[0] == gl.GL_FLOAT else 2)
+
         # This will only init the corresponding buffer object
-        n_verts_bytes = v * self.vert_size * self.verts.element_size() if v > 0 else self.n_verts_bytes
-        n_faces_bytes = f * self.face_size * self.faces.element_size() if f > 0 else self.n_faces_bytes
+        n_verts_bytes = v * self.vert_size * element_size if v > 0 else self.n_verts_bytes
 
         # Housekeeping
         if hasattr(self, 'vao'):
@@ -424,15 +437,17 @@ class Mesh:
         # https://stackoverflow.com/questions/67195932/pyopengl-cannot-render-any-vao
         cumsum = 0
         for i, (s, t) in enumerate(zip(self.vert_sizes, self.vert_gl_types)):
-            gl.glVertexAttribPointer(i, s, t, gl.GL_FALSE, self.vert_size * self.verts.element_size(), ctypes.c_void_p(cumsum * self.verts.element_size()))  # we use 32 bit float
+            gl.glVertexAttribPointer(i, s, t, gl.GL_FALSE, self.vert_size * element_size, ctypes.c_void_p(cumsum * element_size))  # we use 32 bit float
             gl.glEnableVertexAttribArray(i)
             cumsum += s
 
-        if n_faces_bytes > 0:
-            # Some implementation has no faces, we dangerously ignore ebo here, assuming they will never be used
-            gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.ebo)
-            gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, n_faces_bytes, ctypes.c_void_p(0), gl.GL_DYNAMIC_DRAW)
-            gl.glBindVertexArray(0)
+        if hasattr(self, 'faces'):
+            n_faces_bytes = f * self.face_size * self.faces.element_size() if f > 0 else self.n_faces_bytes
+            if n_faces_bytes > 0:
+                # Some implementation has no faces, we dangerously ignore ebo here, assuming they will never be used
+                gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.ebo)
+                gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, n_faces_bytes, ctypes.c_void_p(0), gl.GL_DYNAMIC_DRAW)
+                gl.glBindVertexArray(0)
 
     def render_imgui(mesh, viewer: 'VolumetricVideoViewer', batch: dotdict):
         from imgui_bundle import imgui
@@ -884,8 +899,13 @@ def hareward_peeling_framebuffer(H: int, W: int):
 
 
 class Gaussian(Mesh):
+
+    class RenderMode(Enum):
+        cuda = auto()
+        fast = auto()
+
     def __init__(self,
-                 filename: str = 'assets/meshes/zju3dv.npz',
+                 filename: str = 'garden.ply',
 
                  gaussian_cfg: dotdict = dotdict(),
                  quad_cfg: dotdict = dotdict(),
@@ -895,6 +915,7 @@ class Gaussian(Mesh):
 
                  H: int = 1024,
                  W: int = 1024,
+                 render_mode=RenderMode.fast.name,
                  **kwargs,
                  ):
         # Import Gaussian Model
@@ -904,6 +925,7 @@ class Gaussian(Mesh):
         # Housekeeping
         super().__init__(**kwargs)
         self.name = split(filename)[-1]
+        self.render_mode = Gaussian.RenderMode[render_mode]
 
         # Init Gaussian related models, for now only the first gaussian model is supported
         if filename.endswith('.npz') or filename.endswith('.pt') or filename.endswith('.pth'):
@@ -961,23 +983,34 @@ class Gaussian(Mesh):
     # The actual rendering function
     @torch.no_grad()
     def render(self, camera: Camera):
+        timer.record('other')
+
         # Perform actual gaussian rendering
         batch = add_batch(to_cuda(camera.to_batch()))
-        rgb, acc, dpt = self.gaussian_model.render(
+        timer.record('batch')
+
+        if self.render_mode == Gaussian.RenderMode.fast:
+            render = self.gaussian_model.render_fast
+        else:
+            render = self.gaussian_model.render
+
+        rgb, acc, dpt = render(
             batch=batch,
             scale_mult=self.scale_mult,
             alpha_mult=self.alpha_mult
         )
+        timer.record('render')
 
-        if self.view_depth:
-            rgba = torch.cat([depth_curve_fn(dpt, cm=self.dpt_cm), acc], dim=-1)  # H, W, 4
-        else:
-            rgba = torch.cat([rgb, acc], dim=-1)  # H, W, 4
+        if rgb is not None:
+            if self.view_depth:
+                rgba = torch.cat([depth_curve_fn(dpt, cm=self.dpt_cm), acc], dim=-1)  # H, W, 4
+            else:
+                rgba = torch.cat([rgb, acc], dim=-1)  # H, W, 4
 
-        # Copy rendered tensor to screen
-        rgba = (rgba.clip(0, 1) * 255).type(torch.uint8).flip(0)  # transform
-        self.quad.copy_to_texture(rgba)
-        self.quad.render()
+            # Copy rendered tensor to screen
+            rgba = (rgba.clip(0, 1) * 255).type(torch.uint8).flip(0)  # transform
+            self.quad.copy_to_texture(rgba)
+            self.quad.render()
 
     def render_imgui(self, viewer: 'VolumetricVideoViewer', batch: dotdict):
         super().render_imgui(viewer, batch)
@@ -994,6 +1027,14 @@ class Gaussian(Mesh):
 
         self.scale_mult = imgui.slider_float(f'Scale multiplier', self.scale_mult, 0.1, 5.0)[1]  # 0.1mm
         self.alpha_mult = imgui.slider_float(f'Alpha multiplier', self.alpha_mult, 0.1, 5.0)[1]  # 0.1mm
+
+        if imgui.begin_combo(f'Render mode', self.render_mode.name):
+            for t in Gaussian.RenderMode:
+                if imgui.selectable(t.name, self.render_mode.name == t)[1]:
+                    self.render_mode = t  # construct enum from name
+                if self.render_mode == t:
+                    imgui.set_item_default_focus()
+            imgui.end_combo()
 
 
 class PointSplat(Gaussian, nn.Module):
@@ -1072,7 +1113,7 @@ class PointSplat(Gaussian, nn.Module):
         mesh.alpha_mult = imgui.slider_float(f'Point alpha multiplier##{i}', mesh.alpha_mult, 0.1, 3.0)[1]  # 0.1mm
 
 
-class Splat(Mesh):  # FIXME: Not rendering, need to debug this
+class Splat(Mesh):
     def __init__(self,
                  *args,
                  H: int = 512,
@@ -1377,7 +1418,7 @@ class HardwareRendering(Splat):
         gl.glScissor(0, 0, W, H)  # only render in this small region of the viewport
 
         # Prepare for input data
-        data = torch.cat([xyz, rgb, rad, occ], dim=-1).type(self.dtype).ravel()
+        data = torch.cat([xyz, rgb.clip(0, 1), rad, occ.clip(0, 1)], dim=-1).type(self.dtype).ravel()
 
         # Upload to opengl for rendering
         CHECK_CUDART_ERROR(cudart.cudaGraphicsMapResources(1, self.cu_vbo, torch.cuda.current_stream().cuda_stream))
@@ -1594,6 +1635,7 @@ class HardwarePeeling(Splat):
         idx, _, _ = self.forward_idx(xyz, rad, batch)  # B, H, W, K
         msk = idx != -1  # B, H, W, K
         idx = torch.where(msk, idx, 0).long()
+        rgb, occ = rgb.clip(0, 1), occ.clip(0, 1)
 
         # Sample things needed for computing screen space weight
         H, W, K, R, T, C = get_opencv_camera_params(batch)

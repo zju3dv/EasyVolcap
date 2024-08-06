@@ -727,6 +727,7 @@ def eval_sh(deg: int, sh: torch.Tensor, dirs: torch.Tensor):
     return result
 
 
+sh_channels = [1, 4, 9, 16]
 sh_channels_4d = [1, 6, 16, 33]
 
 

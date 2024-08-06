@@ -4,6 +4,42 @@ This documents provides more details on the installation process of ***EasyVolca
 
 For basic installation, you should follow the guide in the [main readme](../../readme.md#installation) first since this doc is an extension to that.
 
+## TLDR for New Linux Servers
+
+```shell
+cd ~
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+chmod +x Miniconda3-latest-Linux-x86_64.sh
+./Miniconda3-latest-Linux-x86_64.sh -b # this option will ignore license
+conda init zsh # assuming you're using zshell
+zsh # manually restart the shell
+
+# Prepare conda environment
+conda install -n base mamba -y -c conda-forge
+mamba create -n easyvolcap "python>=3.11,<3.12" -y
+mamba init zsh # assuming you're using zshell
+zsh # manually restart the shell
+conda activate easyvolcap
+
+# Install PyTorch
+pip install torch torchvision torchaudio -f https://download.pytorch.org/whl/torch_stable.html
+
+# Clone the repo
+mkdir -p local
+cd local
+git clone https://github.com/dendenxu/longvolcap
+cd longvolcap
+
+# Install pip dependencies
+cat requirements.txt | sed -e '/^\s*-.*$/d' -e '/^\s*#.*$/d' -e '/^\s*$/d' | awk '{split($0, a, "#"); if (length(a) > 1) print a[1]; else print $0;}' | awk '{split($0, a, "@"); if (length(a) > 1) print a[2]; else print $0;}' | xargs -n 1 pip install
+
+# Install development pip dependencies
+cat requirements-devel.txt | sed -e '/^\s*-.*$/d' -e '/^\s*#.*$/d' -e '/^\s*$/d' | awk '{split($0, a, "#"); if (length(a) > 1) print a[1]; else print $0;}' | awk '{split($0, a, "@"); if (length(a) > 1) print a[2]; else print $0;}' | xargs -n 1 pip install # use this for full dependencies
+
+# Register EasyVolcp for imports
+pip install -v -e . --no-build-isolation --no-deps
+```
+
 ## No-Clone Install Using `pip`
 
 Optionally if you only want to use ***EasyVolcap*** in other projects by directly importing its components, you can install it from GitHub with:
@@ -31,7 +67,7 @@ cat requirements.txt | sed -e '/^\s*-.*$/d' -e '/^\s*#.*$/d' -e '/^\s*$/d' | awk
 cat requirements-devel.txt | sed -e '/^\s*-.*$/d' -e '/^\s*#.*$/d' -e '/^\s*$/d' | awk '{split($0, a, "#"); if (length(a) > 1) print a[1]; else print $0;}' | awk '{split($0, a, "@"); if (length(a) > 1) print a[2]; else print $0;}' | xargs -n 1 pip install # use this for full dependencies
 
 # Register EasyVolcp for imports
-pip install -e . --no-build-isolation --no-deps
+pip install -v -e . --no-build-isolation --no-deps
 ```
 
 Note that the `--no-build-isolation` gives faster install by not creating a virtual environment for building dependencies.
@@ -45,11 +81,26 @@ python -m pip install -U pip setuptools
 
 ## Install Using `conda`
 
+If you haven't got conda installed, strongly recommend installing it from [the official website](https://docs.anaconda.com/miniconda/).
+For example, on Linux, this can be done using:
+
+```shell
+cd ~
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+chmod +x Miniconda3-latest-Linux-x86_64.sh
+./Miniconda3-latest-Linux-x86_64.sh -b # this option will ignore license
+conda init zsh # assuming you're using zshell
+```
+
+Then, you can install ***EasyVolcap*** using `conda`:
+
 Copy-and-paste version of the installation process listed below. For a more thorough explanation, read on.
+
 ```shell
 # Prepare conda environment
 conda install -n base mamba -y -c conda-forge
 mamba create -n easyvolcap "python>=3.11,<3.12" -y
+mamba init zsh # assuming you're using zshell
 conda activate easyvolcap
 
 # Install conda dependencies
@@ -119,8 +170,9 @@ conda install -n base mamba -c conda-forge -y
 # And update the environment.yml file to use python 3.9 instead of 3.10
 # mamba create -n easyvolcap "python==3.10" -y
 # mamba create -n easyvolcap "python>=3.10,<3.10" -y
-mamba create -n easyvolcap "python>=3.11,<3.12" -y
-conda activate easyvolcap
+mamba init zsh
+mamba create -n easyvolcap "python~=3.11" -y
+mamba activate easyvolcap
 mamba env update # picks up environment.yml
 
 # With the environment created, install other dependencies 

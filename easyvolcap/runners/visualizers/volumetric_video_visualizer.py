@@ -24,6 +24,7 @@ class VolumetricVideoVisualizer:  # this should act as a base class for other ty
                  store_ground_truth: bool = True,  # store the ground truth rendered values
                  store_image_error: bool = True,  # render the error map (usually mse)
                  store_video_output: bool = False,  # whether to construct .mp4 from .png s
+                 generate_video_using_cuda: bool = False,
 
                  vis_ext: str = '.png',  # faster saving, faster viewing, not good for evaluation (metrics)
                  result_dir: str = 'data/result',
@@ -51,6 +52,7 @@ class VolumetricVideoVisualizer:  # this should act as a base class for other ty
         self.store_ground_truth = store_ground_truth
         self.store_video_output = store_video_output
         self.store_image_error = store_image_error
+        self.generate_video_using_cuda = generate_video_using_cuda
 
         result_dir = join(result_dir, cfg.exp_name)  # MARK: global configuration # TODO: unify the global config, currently a hack for orbit.yaml here
         result_dir = join(result_dir, str(save_tag)) if save_tag != '' else result_dir  # could be a pure number
@@ -150,11 +152,21 @@ class VolumetricVideoVisualizer:  # this should act as a base class for other ty
             img = img.permute(0, 3, 1, 2)  # B, 2, H, W
             img = flow_to_image(img).view(B, -1, H * W).permute(0, 2, 1)  # B, H*W, 3
             img = img.float() / 255.0
+            if 'flow_weight' in batch:
+                img = img * batch.flow_weight.view(B, H * W, 1)
             if self.store_ground_truth and 'flow' in batch:
-                img_gt = batch.flow.view(B, H, W, C).float()  # B, 2, H, W
+                img_gt = batch.flow.view(B, H, W, C).float()
                 img_gt = img_gt.permute(0, 3, 1, 2)  # B, 2, H, W
                 img_gt = flow_to_image(img_gt).view(B, -1, H * W).permute(0, 2, 1)  # B, H*W, 3
                 img_gt = img_gt.float() / 255.0
+                if 'flow_weight' in batch:
+                    img_gt = img_gt * batch.flow_weight.view(B, H * W, 1)
+
+        elif type == Visualization.IMAGE_LOSS_WEIGHT:
+            if 'img_loss_wet' in batch:
+                img = batch.img_loss_wet
+                img = img / img.max()
+                img = img.expand(-1, -1, 3)
 
         # ... implement more
         elif type == Visualization.RENDER:
@@ -318,11 +330,14 @@ class VolumetricVideoVisualizer:  # this should act as a base class for other ty
                 result_dir = dirname(join(self.result_dir, self.img_pattern)).format(type=type.name, camera=self.camera, frame=self.frame)
                 result_str = f'"{result_dir}/*{self.vis_ext}"'
                 output_path = result_str[1:].split('*')[0][:-1] + '.mp4'
-                try:
-                    generate_video(result_str, output_path, fps=self.video_fps)  # one video for one type?
-                except RuntimeError as e:
-                    log(yellow('Error encountered during video composition, will retry without hardware encoding'))
-                    generate_video(result_str, output_path, fps=self.video_fps, hwaccel='none', preset='veryslow', vcodec='libx265')  # one video for one type?
+                if self.generate_video_using_cuda:
+                    try:
+                        generate_video(result_str, output_path, fps=self.video_fps)  # one video for one type?
+                    except RuntimeError as e:
+                        log(yellow('Error encountered during video composition, will retry without hardware encoding'))
+                        generate_video(result_str, output_path, fps=self.video_fps, hwaccel='none', vcodec='libx265')  # one video for one type?
+                else:
+                    generate_video(result_str, output_path, fps=self.video_fps, hwaccel='none', vcodec='libx265')  # one video for one type?
                 log(f'Video generated: {blue(output_path)}')
                 # TODO: use timg/tiv to visaulize the video / image on disk to the commandline
 

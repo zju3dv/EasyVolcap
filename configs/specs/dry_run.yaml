@@ -1,6 +1,6 @@
 dataloader_cfg: &dataloader_cfg
     dataset_cfg:
-        skip_loading_images: True
+        disk_dataset: True
 
 val_dataloader_cfg: *dataloader_cfg
 

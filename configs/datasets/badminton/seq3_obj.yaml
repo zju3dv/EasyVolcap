@@ -1,0 +1,10 @@
+configs: configs/datasets/badminton/seq3.yaml
+
+dataloader_cfg: &dataloader_cfg
+    dataset_cfg: &dataset_cfg # ratio: 0.5
+        bounds: [[-0.5810, -1.1776, -0.1243], [2.9934, 0.6394, 0.3520]]
+        # bounds: [[ 0.1040, -0.5376, -0.1983], [ 2.0850, 0.2884, 0.2797]]
+
+val_dataloader_cfg:
+    dataset_cfg:
+        <<: *dataset_cfg

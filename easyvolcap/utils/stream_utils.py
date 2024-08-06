@@ -1,11 +1,13 @@
 import cv2
 import time
 import torch
+from typing import List
 from os.path import join
 import torch.nn.functional as F
 from multiprocessing import Process, Queue
-from easyvolcap.utils.base_utils import dotdict
+
 from easyvolcap.utils.console_utils import *
+from easyvolcap.utils.base_utils import dotdict
 
 
 class MultiWebcamUSB:
@@ -13,9 +15,17 @@ class MultiWebcamUSB:
     def __init__(self,
                  cam_cfgs=dotdict(),
                  save_dir=f'data/webcam/simple/actor1',
-                 save_tag=f'images'):
-        # Camera parameters and save directory
+                 save_tag=f'images',
+                 view_inds: List[int] = [0, None, 1],
+                 view_sample: List[int] = [0, None, 1]):
+        # Camera related parameters
         self.cam_cfgs = cam_cfgs
+        self.view_sample = view_sample
+        if len(self.view_sample) != 3: self.view_inds = view_inds[self.view_sample]  # this is a list of indices
+        else: self.view_inds = view_inds[self.view_sample[0]:self.view_sample[1]:self.view_sample[2]]  # begin, start, end
+        self.cam_cfgs = [self.cam_cfgs[i] for i in self.view_inds]
+
+        # Save directory related parameters
         self.save_dir = save_dir
         self.save_tag = save_tag
         self.save_pth = join(self.save_dir, self.save_tag)
@@ -29,7 +39,7 @@ class MultiWebcamUSB:
 
         # Camera threads
         self.camera_threads = []
-        for i, cam_cfg in enumerate(self.cam_cfgs.values()):
+        for i, cam_cfg in enumerate(self.cam_cfgs):
             thread = Process(target=self.start, args=(i, cam_cfg, self.queue_imgs, self.queue_flag))
             thread.start()
             self.camera_threads.append(thread)

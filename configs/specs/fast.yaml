@@ -1,0 +1,15 @@
+# MARK: Doesn't work: much larger model but not significantly better results
+
+# These are configs for training on longer sequences using the Temporal Gaussian Hierarchy method
+# Including initialization tuning, densification and opacity reset controlling
+# And a deeper hierarchy for easier management of GPU memory
+# Since we're training for long sequences, every bit of densification matter, thus it should never stop
+
+configs: configs/specs/long.yaml
+
+model_cfg:
+    network_cfg:
+        min_denom_for_gradient: 3 # prune less non-visible points
+        densify_through_all: True # will use all iterations for densification instead of doing extra pruning
+        # perframe_sparse_scale_mult: 1.0
+        # segment_sparse_scale_mult: 1.0

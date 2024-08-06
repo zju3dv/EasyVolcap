@@ -21,6 +21,8 @@ class SamplingType(Enum):
     SURFACE_DISTRIBUTION = auto()
     RANDOM_DOWN_SAMPLE = auto()
     VOXEL_DOWN_SAMPLE = auto()
+    REMOVE_OUTLIER = auto()
+    NONE = auto()
 
 
 def estimate_occupancy_field(xyz: torch.Tensor, rad: torch.Tensor, occ: torch.Tensor):
@@ -264,6 +266,46 @@ def voxel_surface_down_sample(pcd: torch.Tensor, pcd_t: torch.Tensor = None, vox
     return pcd_new
 
 
+def voxel_surface_down_sample_with_features(pcd: torch.Tensor, feat: torch.Tensor = None, voxel_size: float = 0.01, dist_th: float = 0.025, n_points: int = 65536):
+    # !: BATCH
+    # TODO: Use number of vertices for good estimation
+    import open3d as o3d
+    import numpy as np
+    import mcubes
+    from easyvolcap.utils.sample_utils import point_mesh_distance
+    from easyvolcap.utils.fusion_utils import voxel_reconstruction
+    from pytorch3d.ops import knn_points, ball_query, sample_farthest_points
+
+    # Performing voxel surface reconstruction
+    vertices, triangles = voxel_reconstruction(pcd, voxel_size)
+
+    # Convert mesh data to torch tensors
+    triangles_torch = torch.as_tensor(vertices[triangles], device=pcd.device, dtype=pcd.dtype).float()
+
+    # Calculate distances using point_mesh_distance
+    dists, _ = point_mesh_distance(pcd[0], triangles_torch)
+
+    # Select points based on distances
+    valid = (dists < dist_th).nonzero()[..., 0]
+    while (len(valid) - n_points) / n_points > 0.005:
+        # There are too many valid points, should control its number
+        ratio = len(valid) / len(pcd[0])  # the ratio of valid points
+        n_expected = int(n_points / ratio)  # the expected number of points before surface sampling
+        pcd, feat = random_with_features(pcd, feat, n_points=n_expected)
+
+        # Calculate distances using point_mesh_distance
+        dists, _ = point_mesh_distance(pcd[0], triangles_torch)
+
+        # Select points based on distances
+        valid = (dists < dist_th).nonzero()[..., 0]
+
+    _, valid = dists.topk(n_points, dim=-1, sorted=False, largest=False)
+    pcd_new = torch.index_select(pcd[0], 0, valid)[None]
+    feat_new = torch.index_select(feat[0], 0, valid)[None]
+
+    return pcd_new, feat_new
+
+
 def filter_bounds(pcd: torch.Tensor, pcd_t: torch.Tensor = None, bounds: torch.Tensor = None):
     valid = ((pcd - bounds[..., 0, :]) > 0).all(dim=-1) & ((pcd - bounds[..., 1, :]) < 0).all(dim=-1)  # mask: B, N
     valid = valid[0].nonzero()[None]  # B, S -> B, V # MARK: SYNC
@@ -283,9 +325,20 @@ def farthest(pcd: torch.Tensor, pcd_t: torch.Tensor = None, lengths: torch.Tenso
     return multi_gather(pcd, idx)
 
 
+def farthest_with_features(pcd: torch.Tensor, feat: torch.Tensor = None, lengths: torch.Tensor = None, n_points: int = 65536):
+    from pytorch3d.ops import knn_points, ball_query, sample_farthest_points
+    idx = sample_farthest_points(pcd, lengths, K=n_points)[1]  # N, K (padded)
+    return multi_gather(pcd, idx), multi_gather(feat, idx)
+
+
 def random(pcd: torch.Tensor, pcd_t: torch.Tensor = None, n_points: int = 65536, std: float = 0.001):
     inds = torch.stack([torch.randperm(pcd.shape[-2], device=pcd.device)[:n_points] for b in range(len(pcd))])  # B, S,
     return multi_gather(pcd, inds)
+
+
+def random_with_features(pcd: torch.Tensor, feat: torch.Tensor, n_points: int = 65536, std: float = 0.001):
+    inds = torch.stack([torch.randperm(pcd.shape[-2], device=pcd.device)[:n_points] for b in range(len(pcd))])  # B, S,
+    return multi_gather(pcd, inds), multi_gather(feat, inds)
 
 
 def voxel_down_sample(pcd: torch.Tensor, pcd_t: torch.Tensor = None, voxel_size=0.005):
@@ -296,6 +349,31 @@ def voxel_down_sample(pcd: torch.Tensor, pcd_t: torch.Tensor = None, voxel_size=
     return torch.as_tensor(np.array(o3d_pcd.points)).to(pcd.device, pcd.dtype, non_blocking=True).view(pcd.shape[0], -1, 3)
 
 
+def voxel_down_sample_and_trace(pcd: torch.Tensor, pcd_color: torch.Tensor = None, voxel_size=0.005):
+    # voxel downsample and return subset of the input pcd with their indices
+    import open3d as o3d
+    log(yellow_slim(f'voxel downsample and trace, original num pcd: {pcd.view(-1, 3).shape[0]}'))
+    o3d_pcd = o3d.geometry.PointCloud()
+    o3d_pcd.points = o3d.utility.Vector3dVector(pcd.view(-1, 3).detach().cpu().numpy())
+    o3d_pcd.colors = o3d.utility.Vector3dVector(pcd_color.view(-1, 3).detach().cpu().numpy())
+    o3d_pcd_down = o3d_pcd.voxel_down_sample(voxel_size)
+
+    kdtree = o3d.geometry.KDTreeFlann(o3d_pcd)
+    idx_in_orig = []
+    for new_idx in tqdm(range(len(o3d_pcd_down.points)), desc='trace each pcd_down idx in original pcd'):
+        k, idx, dist = kdtree.search_knn_vector_3d(o3d_pcd_down.points[new_idx], 1)
+        idx_in_orig.append(idx[0])
+    idx_in_orig = np.unique(np.array(idx_in_orig))
+
+    o3d_pcd = o3d_pcd.select_by_index(idx_in_orig)
+
+    pcd_tensor = torch.as_tensor(np.array(o3d_pcd.points)).to(pcd.device, pcd.dtype, non_blocking=True).view(pcd.shape[0], -1, 3)
+    rgb_tensor = torch.as_tensor(np.array(o3d_pcd.colors)).to(pcd.device, pcd.dtype, non_blocking=True).view(pcd.shape[0], -1, 3)
+    idx_tensor = torch.as_tensor(idx_in_orig).to(pcd.device, pcd.dtype, non_blocking=True).view(pcd.shape[0], -1)
+
+    return pcd_tensor, rgb_tensor, idx_tensor
+
+
 def remove_outlier(pcd: torch.Tensor, pcd_t: torch.Tensor = None, K: int = 20, std_ratio=2.0, return_inds=False):  # !: BATCH
     import open3d as o3d
     o3d_pcd = o3d.geometry.PointCloud()
@@ -304,6 +382,16 @@ def remove_outlier(pcd: torch.Tensor, pcd_t: torch.Tensor = None, K: int = 20, s
     if return_inds:
         return torch.as_tensor(np.array(ind), device=pcd.device)[None]  # N,
     return torch.as_tensor(np.array(o3d_pcd.points)[np.array(ind)]).to(pcd.device, pcd.dtype, non_blocking=True).view(pcd.shape[0], -1, 3)
+
+
+def remove_outlier_with_features(pcd: torch.Tensor, feat: torch.Tensor = None, K: int = 20, std_ratio=2.0):  # !: BATCH
+    import open3d as o3d
+    o3d_pcd = o3d.geometry.PointCloud()
+    o3d_pcd.points = o3d.utility.Vector3dVector(pcd.view(-1, 3).detach().cpu().numpy())
+    cl, ind = o3d_pcd.remove_statistical_outlier(nb_neighbors=K, std_ratio=std_ratio)
+    # return torch.as_tensor(np.array(o3d_pcd.points)[np.array(ind)]).to(pcd.device, pcd.dtype, non_blocking=True).view(pcd.shape[0], -1, 3)
+    ind = torch.as_tensor(np.array(ind), device=pcd.device).to(pcd.device, non_blocking=True)  # N,
+    return pcd[:, ind], feat[:, ind]
 
 
 def farthest_down_sample(pcd: torch.Tensor, pcd_t: torch.Tensor = None, K: int = 65536):

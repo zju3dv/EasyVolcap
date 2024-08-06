@@ -1,6 +1,4 @@
 """
-Load the pretrained model of ENeRF's IBR module
-Will serve as a blender for image based rendering of the colors
 How do we determine which view to use for the blending?
 Or just use median value?
 This seems counter-intuitive
@@ -28,14 +26,16 @@ from easyvolcap.utils.ibr_utils import sample_geometry_feature_image
 def main():
     # Prepare arguments
     args = dotdict(
-        data_root='data/mobile_stage/dance3',
+        data_root='data/badminton/seq3',
         images_dir='images',
-        cameras_dir='optimized',
-        input='surfs6k',
-        output='surfs6k',
+        cameras_dir='',
+        input='surfs7k',
+        output='surfs7k',
         n_srcs=3,
         ratio=0.25,  # smaller ratio for blurrier points
         sequential_image_loading=False,
+
+        frame_sample=[0, None, 1],
 
         # TODO: Use IBR models for this, for now, they require voxel feature input thus cannot be easily separated
         # enerfi_path='data/trained_model/enerfi_dtu',
@@ -58,17 +58,28 @@ def main():
     src_ixts = Ks  # V, 3, 3
     src_exts = torch.cat([Rs, Ts], dim=-1)  # V, 3, 4
 
-    files = sorted(os.listdir(join(args.data_root, args.input)))
-    images = sorted(os.listdir(join(args.data_root, args.images_dir, camera_names[0])))
+    b, e, s = args.frame_sample
+    e = e or len(os.listdir(join(args.data_root, args.input)))
+    # files = sorted(os.listdir(join(args.data_root, args.input)))[b:e:s]
+    files = [f'{f:06d}.ply' for f in range(b, e, s)]
+    if os.path.exists(join(args.data_root, args.images_dir, camera_names[0])):
+        images = sorted(os.listdir(join(args.data_root, args.images_dir, camera_names[0])))
+        mode = 'images'
+    else: mode = 'bkgd'
     for file in tqdm(files):
         # Perform dataloading and transfer
-        idx = int(splitext(file)[0])
+        idx = int(splitext(basename(file))[0])
         xyz = load_pts(join(args.data_root, args.input, file))[0]
         xyz = to_cuda(xyz)  # N, 3
 
         # Load all images for this frame
         log(f'Loading images for frame {idx}')
-        imgs = parallel_execution([join(args.data_root, args.images_dir, cam, images[idx]) for cam in camera_names], ratio=args.ratio, action=load_image, sequential=args.sequential_image_loading)
+        if mode == 'images':
+            imgs = parallel_execution([join(args.data_root, args.images_dir, cam, images[idx]) for cam in camera_names], ratio=args.ratio, action=load_image, sequential=args.sequential_image_loading)
+        elif mode == 'bkgd':
+            imgs = parallel_execution([join(args.data_root, args.images_dir, f'{cam}.jpg') for cam in camera_names], ratio=args.ratio, action=load_image, sequential=args.sequential_image_loading)
+        else:
+            raise ValueError(f'Unknown mode {mode}')
         imgs = to_cuda(imgs)  # V, Hx, Wx, 3
         Hs = torch.as_tensor([img.shape[-3] for img in imgs], device=xyz.device)  # V,
         Ws = torch.as_tensor([img.shape[-2] for img in imgs], device=xyz.device)  # V,

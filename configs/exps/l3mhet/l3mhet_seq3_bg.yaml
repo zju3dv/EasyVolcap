@@ -1,0 +1,21 @@
+configs:
+    - configs/base.yaml # default arguments for the whole codebase
+    - configs/models/l3mhet.yaml # network model configuration
+    - configs/datasets/badminton/seq3.yaml # dataset usage configuration
+    - configs/specs/optimized.yaml
+    - configs/specs/static.yaml
+    - configs/specs/transient.yaml
+
+dataloader_cfg: &dataloader_cfg
+    dataset_cfg:
+        images_dir: bkgd/images
+
+val_dataloader_cfg: *dataloader_cfg
+
+# model_cfg:
+#     supervisor_cfg:
+#         # distortion loss works the best with large number of inputs?
+#         dist_loss_weight: 0.002 # controls empty space distortion # FIXME: DEBUG DISTORTION LOSS
+
+# prettier-ignore
+exp_name: {{fileBasenameNoExtension}}

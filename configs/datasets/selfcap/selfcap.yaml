@@ -1,0 +1,16 @@
+dataloader_cfg:
+    dataset_cfg: &dataset_cfg # ratio: 0.5 # 1k
+        ratio: 0.75 # 1.6k
+        scene_scale: 9.0 # might be wrong, need accurate scale
+        near: 1.0
+        far: 20.0
+        bounds: [[-10, -10, -10.0], [10, 10, 10]] # axis-aligned bounding box of the scene, affects ray sampling and bounding box of some explicit algorithms
+        view_sample: [2, null, 1]
+
+val_dataloader_cfg:
+    dataset_cfg:
+        <<: *dataset_cfg
+        view_sample: [2, null, 10]
+
+viewer_cfg:
+    playing_fps: 60

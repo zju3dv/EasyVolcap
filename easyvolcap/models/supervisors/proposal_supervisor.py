@@ -7,7 +7,7 @@ from easyvolcap.engine.registry import call_from_cfg
 
 from easyvolcap.utils.console_utils import *
 from easyvolcap.utils.image_utils import resize_image
-from easyvolcap.utils.loss_utils import lossfun_outer, lossfun_distortion
+from easyvolcap.utils.loss_utils import lossfun_outer, lossfun_distortion, ImgLossType
 
 from easyvolcap.models.supervisors.volumetric_video_supervisor import VolumetricVideoSupervisor
 

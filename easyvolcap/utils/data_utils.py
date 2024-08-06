@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import cv2
 import h5py
 import torch
@@ -21,10 +22,18 @@ from torch.utils.data._utils.pin_memory import pin_memory
 from torch.utils.data._utils.collate import default_collate, default_convert
 
 from easyvolcap.utils.parallel_utils import parallel_execution
-from easyvolcap.utils.base_utils import dotdict
 from easyvolcap.utils.console_utils import *
 
 from enum import Enum, auto
+
+
+def save_quad_mesh_to_obj(vertices: np.ndarray, quads: np.ndarray, filename: str):
+    with open(filename, 'w') as file:
+        for vertex in vertices:
+            file.write(f"v {vertex[0]} {vertex[1]} {vertex[2]}\n")
+
+        for quad in quads:
+            file.write(f"f {quad[0]} {quad[1]} {quad[2]} {quad[3]}\n")
 
 # Copied from enerf (maybe was in turn copied from dtu)
 
@@ -111,7 +120,7 @@ def generate_video(result_str: str,
                    cqv: int = 19,
                    lookahead: int = 20,
                    hwaccel: str = 'cuda',
-                   preset: str = 'p7',
+                   preset: str = None,
                    tag: str = 'hvc1',
                    vcodec: str = 'hevc_nvenc',
                    pix_fmt: str = 'yuv420p',  # chrome friendly
@@ -134,7 +143,9 @@ def generate_video(result_str: str,
         '-y',
         '-i', result_str,
         '-c:v', vcodec,
+    ] + ([
         '-preset', preset,
+    ] if preset is not None else []) + [
         '-cq:v', cqv,
         '-rc:v', 'vbr',
         '-tag:v', tag,
@@ -301,6 +312,7 @@ class Visualization(Enum):
 
     # Loss related output
     IMAGE_LOSS_WEIGHT = auto()
+
 
 class DataSplit(Enum):
     TRAIN = auto()
@@ -526,8 +538,21 @@ def load_mesh(filename: str, device='cuda', load_uv=False, load_aux=False, backe
         return v, f
 
 
+def read_xyz_file(file_path):
+    """Reads a .xyz file and returns a numpy array of points."""
+    with open(file_path, 'r') as file:
+        points = np.array([list(map(float, line.split())) for line in file.readlines()])
+
+    vertices = points[:, :3]
+    colors = 1 - points[:, 3:]
+    return vertices, colors
+
+
 def load_pts(filename: str):
     from pyntcloud import PyntCloud
+    if filename.endswith('.xyz'):
+        vertices, colors = read_xyz_file(filename)
+        return vertices, colors, None, None
     cloud = PyntCloud.from_file(filename)
     verts = cloud.xyz
     if 'red' in cloud.points and 'green' in cloud.points and 'blue' in cloud.points:
@@ -599,7 +624,7 @@ def export_pts(pts: torch.Tensor, color: torch.Tensor = None, normal: torch.Tens
     cloud = PyntCloud(df)  # construct the data
     dir = dirname(filename)
     if dir: os.makedirs(dir, exist_ok=True)
-    return cloud.to_file(filename, **kwargs) # maybe write comments here: comments: list of strings
+    return cloud.to_file(filename, **kwargs)  # maybe write comments here: comments: list of strings
 
 
 def export_lines(verts: torch.Tensor, lines: torch.Tensor, color: torch.Tensor = None, filename: str = 'default.ply'):
@@ -887,7 +912,7 @@ def to_cuda(batch, device="cuda", ignore_list: bool = False) -> torch.Tensor:
     elif isinstance(batch, torch.Tensor):
         batch = batch.to(device, non_blocking=True)
     else:  # numpy and others
-        batch = torch.as_tensor(batch, device=device)
+        batch = torch.as_tensor(batch).to(device, non_blocking=True)
     return batch
 
 
@@ -923,11 +948,11 @@ def to_x(batch, x: str) -> Union[torch.Tensor, dotdict[str, torch.Tensor]]:
     return batch
 
 
-def to_tensor(batch, ignore_list: bool = False) -> Union[torch.Tensor, dotdict[str, torch.Tensor]]:
-    if isinstance(batch, (tuple, list)) and not ignore_list:
-        batch = [to_tensor(b, ignore_list) for b in batch]
+def to_tensor(batch, non_recursive_list: bool = False) -> Union[torch.Tensor, dotdict[str, torch.Tensor]]:
+    if isinstance(batch, (tuple, list)) and not non_recursive_list:
+        batch = [to_tensor(b, non_recursive_list) for b in batch]
     elif isinstance(batch, dict):
-        batch = dotdict({k: to_tensor(v, ignore_list) for k, v in batch.items()})
+        batch = dotdict({k: to_tensor(v, non_recursive_list) for k, v in batch.items()})
     elif isinstance(batch, torch.Tensor):
         pass
     else:  # numpy and others
@@ -1198,10 +1223,10 @@ def save_image(img_path: str, img: np.ndarray, jpeg_quality=75, png_compression=
         os.makedirs(dirname(img_path), exist_ok=True)
     if img_path.endswith('.png'):
         max = np.iinfo(save_dtype).max
-        img = (img * max).clip(0, max).astype(save_dtype)
+        img = (img * max).clip(0, max).round().astype(save_dtype)
     elif img_path.endswith('.jpg'):
         img = img[..., :3]  # only color
-        img = (img * 255).clip(0, 255).astype(np.uint8)
+        img = (img * 255).clip(0, 255).round().astype(np.uint8)
     elif img_path.endswith('.hdr'):
         img = img[..., :3]  # only color
     elif img_path.endswith('.exr'):
@@ -1455,19 +1480,20 @@ def affine_inverse(m: np.ndarray):
     return affine_inverse(torch.from_numpy(m)).numpy()
 
 
+def normalize_image(image: np.ndarray):
+    image = torch.from_numpy(image)  # pytorch is significantly faster than np
+    if image.ndim >= 3 and image.shape[-1] >= 3:
+        image[..., :3] = image[..., [2, 1, 0]]
+    image = image / torch.iinfo(image.dtype).max
+    image = image.float()
+    return image.numpy()
+
+
 def load_image_from_bytes(buffer: np.ndarray, ratio=1.0, normalize=False, decode_flag=cv2.IMREAD_UNCHANGED):
     # from nvjpeg import NvJpeg
     # if not hasattr(load_image_from_bytes, 'nj'):
     #     load_image_from_bytes.nj = NvJpeg()
     # nj: NvJpeg = load_image_from_bytes.nj
-
-    def normalize_image(image):
-        image = torch.from_numpy(image)  # pytorch is significantly faster than np
-        if image.ndim >= 3 and image.shape[-1] >= 3:
-            image[..., :3] = image[..., [2, 1, 0]]
-        image = image / torch.iinfo(image.dtype).max
-        image = image.float()
-        return image.numpy()
 
     if isinstance(buffer, BytesIO):
         buffer = buffer.getvalue()  # slow? copy?
@@ -1604,19 +1630,44 @@ def load_resize_undist_im_bytes(imp: str,
                                 decode_flag=cv2.IMREAD_UNCHANGED,
                                 dist_opt_K: bool = False,
                                 jpeg_quality: int = 100,
-                                png_compression: int = 6
+                                png_compression: int = 6,
+                                decode: bool = True,
+                                encode: bool = True,
+                                backend: str = 'colmap',
                                 ):
+
     # Load image -> resize -> undistort -> save to bytes (jpeg)
-    img = load_image_from_bytes(load_image_bytes(imp), decode_flag=decode_flag)[..., :3]  # cv2 decoding (fast)
+    if decode:
+        img = load_image_from_bytes(load_image_bytes(imp), decode_flag=decode_flag)[..., :3]  # cv2 decoding (fast)
 
     oH, oW = img.shape[:2]
 
-    if dist_opt_K and np.sum(np.abs(D)) != 0.0:
-        newCameraMatrix, _ = cv2.getOptimalNewCameraMatrix(K, D, (oW, oH), 0, (oW, oH))
-        img = cv2.undistort(img, K, D, newCameraMatrix=newCameraMatrix)
-        K = newCameraMatrix
-    elif np.sum(np.abs(D)) != 0.0:
-        img = cv2.undistort(img, K, D)
+    if backend == 'colmap' and sys.platform != 'win32':
+        from easyvolcap.utils.undist_utils import colmap_undistort_numpy
+
+        if dist_opt_K and np.sum(np.abs(D)) != 0.0:
+
+            img, K = colmap_undistort_numpy(img, K, D, blank_pixels=False)
+            img = img.round().clip(0, 255).astype(np.uint8)
+        elif np.sum(np.abs(D)) != 0.0:
+            img, K = colmap_undistort_numpy(img, K, D, blank_pixels=True)
+            img = img.round().clip(0, 255).astype(np.uint8)
+
+    elif backend == 'cv2' or sys.platform == 'win32':
+        if dist_opt_K and np.sum(np.abs(D)) != 0.0:
+            # https://github.com/nerfstudio-project/nerfstudio/pull/3071
+            # because OpenCV expects the pixel coord to be top-left, we need to shift the principal point by 0.5
+            # see https://github.com/nerfstudio-project/nerfstudio/issues/3048
+            newCameraMatrix, roi = cv2.getOptimalNewCameraMatrix(K, D, (oW, oH), 0, (oW, oH))
+            img = cv2.undistort(img, K, D, newCameraMatrix=newCameraMatrix)
+            K = newCameraMatrix
+        elif np.sum(np.abs(D)) != 0.0:
+            img = cv2.undistort(img, K, D)
+
+    else:
+        raise NotImplementedError(f'Unknown backend: {backend}')
+
+    oH, oW = img.shape[:2]
 
     # Maybe update image size
     if not ((isinstance(ratio, float) and ratio == 1.0)):
@@ -1635,7 +1686,10 @@ def load_resize_undist_im_bytes(imp: str,
     if center_crop_size[0] > 0:
         img, K, H, W = center_crop_img_ixt(img, K, H, W, center_crop_size)
 
-    is_success, buffer = cv2.imencode(encode_ext, img, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality, cv2.IMWRITE_PNG_COMPRESSION, png_compression])
+    if encode:
+        is_success, buffer = cv2.imencode(encode_ext, img, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality, cv2.IMWRITE_PNG_COMPRESSION, png_compression])
+    else:
+        buffer = img
 
     if 'H' not in locals(): H, W = oH, oW
     return buffer, K, H, W
@@ -1669,6 +1723,7 @@ def load_resize_undist_ims_bytes(ims: np.ndarray,
                                  ratio: Union[float, List[int], List[float]] = 1.0,
                                  center_crop_size: List[int] = [-1, -1],
                                  desc="Loading image bytes from disk",
+                                 print_progress=True,
                                  **kwargs):
     sh = ims.shape  # V, N
     # Ks = np.broadcast_to(Ks[:, None], (sh + (3, 3)))
@@ -1699,7 +1754,7 @@ def load_resize_undist_ims_bytes(ims: np.ndarray,
     # Should we batch these instead of loading?
     out = parallel_execution(ims, Ks, Ds, ratio, center_crop_size,
                              action=load_resize_undist_im_bytes,
-                             desc=desc, print_progress=True,
+                             desc=desc, print_progress=print_progress,
                              **kwargs,
                              )
 
@@ -1723,14 +1778,20 @@ def decode_crop_fill_im_bytes(im_bytes: BytesIO,
                               decode_flag=cv2.IMREAD_UNCHANGED,
                               jpeg_quality: int = 100,
                               png_compression: int = 6,
+                              decode: bool = True,
+                              encode: bool = True,
                               **kwargs):
     # im_bytes: a series of jpeg bytes for the image
     # mk_bytes: a series of jpeg bytes for the mask
     # K: 3, 3 intrinsics matrix
 
     # Use load_image_from_bytes to decode and update jpeg streams
-    img = load_image_from_bytes(im_bytes, decode_flag=decode_flag)  # H, W, 3
-    msk = load_image_from_bytes(mk_bytes, decode_flag=decode_flag)  # H, W, 3
+    if decode:
+        img = load_image_from_bytes(im_bytes, decode_flag=decode_flag)  # H, W, 3
+        msk = load_image_from_bytes(mk_bytes, decode_flag=decode_flag)  # H, W, 3
+    else:
+        img = im_bytes
+        msk = mk_bytes
 
     # Crop both mask and the image using bbox's 2D projection
     H, W, _ = img.shape
@@ -1754,9 +1815,13 @@ def decode_crop_fill_im_bytes(im_bytes: BytesIO,
     img = (img * (msk / 255)).clip(0, 255).astype(np.uint8)  # fill with black, indexing starts at the front
 
     # Reencode the videos and masks
-    if isinstance(encode_ext, str): encode_ext = [encode_ext] * 2  # '.jpg' -> ['.jpg', '.jpg']
-    im_bytes = cv2.imencode(encode_ext[0], img, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality, cv2.IMWRITE_PNG_COMPRESSION, png_compression])[1]  # is_sucess, bytes_array
-    mk_bytes = cv2.imencode(encode_ext[1], msk, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality, cv2.IMWRITE_PNG_COMPRESSION, png_compression])[1]  # is_sucess, bytes_array
+    if encode:
+        if isinstance(encode_ext, str): encode_ext = [encode_ext] * 2  # '.jpg' -> ['.jpg', '.jpg']
+        im_bytes = cv2.imencode(encode_ext[0], img, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality, cv2.IMWRITE_PNG_COMPRESSION, png_compression])[1]  # is_sucess, bytes_array
+        mk_bytes = cv2.imencode(encode_ext[1], msk, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality, cv2.IMWRITE_PNG_COMPRESSION, png_compression])[1]  # is_sucess, bytes_array
+    else:
+        im_bytes = img
+        mk_bytes = msk
     return im_bytes, mk_bytes, K, h, w, x, y
 
 

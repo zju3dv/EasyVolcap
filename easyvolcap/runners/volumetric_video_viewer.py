@@ -28,6 +28,7 @@ import glfw
 from easyvolcap.engine import cfg  # need this for initialization?
 from easyvolcap.models.noop_model import NoopModel
 from easyvolcap.runners.volumetric_video_runner import VolumetricVideoRunner
+from easyvolcap.models.cameras.optimizable_camera import OptimizableCamera
 
 from easyvolcap.engine import RUNNERS  # controls the optimization loop of a particular epoch
 from easyvolcap.utils.console_utils import *
@@ -48,14 +49,14 @@ class VolumetricVideoViewer:
                  runner: VolumetricVideoRunner,  # already built outside of this init
 
                  window_size: List[int] = [768, 1366],  # height, width
-                 window_title: str = f'EasyVolcap',  # MARK: global config
+                 window_title: str = cfg.exp_name,  # MARK: global config
                  exp_name: str = cfg.exp_name,
 
                  font_size: int = 18,
-                 font_bold: str = 'assets/fonts/CascadiaCodePL-Bold.otf',
-                 font_italic: str = 'assets/fonts/CascadiaCodePL-Italic.otf',
-                 font_default: str = 'assets/fonts/CascadiaCodePL-Regular.otf',
-                 icon_file: str = 'assets/imgs/easyvolcap.png',
+                 font_bold: str = f'assets/fonts/CascadiaCodePL-Bold.otf',
+                 font_italic: str = f'assets/fonts/CascadiaCodePL-Italic.otf',
+                 font_default: str = f'assets/fonts/CascadiaCodePL-Regular.otf',
+                 icon_file: str = f'assets/imgs/easyvolcap.png',
 
                  autoplay_speed: float = 0.005,  # 100 frames for a full loop
                  autoplay: bool = False,
@@ -95,11 +96,17 @@ class VolumetricVideoViewer:
                  load_keyframes_at_init: bool = False,
                  show_metrics_window: bool = False,
                  show_demo_window: bool = False,
+
+                 # Performance related
+                 model_requires_batch: bool = True,
+                 model_requires_cuda: bool = True,
+                 model_requires_bounds: bool = True,
                  ) -> None:
         # Camera related configurations
         self.camera_cfg = camera_cfg
         self.fullscreen = fullscreen
         self.window_size = window_size
+        self.init_window_size = window_size
         self.window_title = window_title
         self.use_vsync = use_vsync
         self.use_window_focal = use_window_focal
@@ -115,8 +122,16 @@ class VolumetricVideoViewer:
         self.font_default = font_default
         self.font_italic = font_italic
         self.font_bold = font_bold
-        self.font_size = font_size
         self.icon_file = icon_file
+        self.font_default = self.font_default if exists(font_default) else join(dirname(__file__), '..', font_default)
+        self.font_italic = self.font_italic if exists(font_italic) else join(dirname(__file__), '..', font_italic)
+        self.font_bold = self.font_bold if exists(font_bold) else join(dirname(__file__), '..', font_bold)
+        self.icon_file = self.icon_file if exists(icon_file) else join(dirname(__file__), '..', icon_file)
+        self.font_default = self.font_default if exists(font_default) else join(dirname(__file__), '..', '..', font_default)
+        self.font_italic = self.font_italic if exists(font_italic) else join(dirname(__file__), '..', '..', font_italic)
+        self.font_bold = self.font_bold if exists(font_bold) else join(dirname(__file__), '..', '..', font_bold)
+        self.icon_file = self.icon_file if exists(icon_file) else join(dirname(__file__), '..', '..', icon_file)
+        self.font_size = font_size
 
         # Runner initialization
         self.exp_name = exp_name
@@ -149,7 +164,7 @@ class VolumetricVideoViewer:
 
         # Timinigs
         self.acc_time = 0
-        self.prev_time = 0
+        self.prev_time = -1
         self.playing_fps = playing_fps
         self.playing_speed = autoplay_speed
         self.playing = autoplay
@@ -200,6 +215,10 @@ class VolumetricVideoViewer:
         self.static = dotdict(batch=dotdict(), output=dotdict(), bg_brightness=bg_brightness)  # static data store updated through the rendering
         self.dynamic = dotdict()
 
+        self.model_requires_batch = model_requires_batch
+        self.model_requires_cuda = model_requires_cuda
+        self.model_requires_bounds = model_requires_bounds
+
     @property
     def render_ratio(self): return self.dataset.render_ratio
 
@@ -246,8 +265,10 @@ class VolumetricVideoViewer:
         self.render_camera.from_batch(camera)
 
     def run(self):
-        while not glfw.window_should_close(self.window):
-            self.frame()
+        self.runner.maybe_jit_model()
+        with torch.inference_mode(self.runner.test_using_inference_mode), torch.no_grad(), torch.cuda.amp.autocast(enabled=self.runner.test_use_amp, cache_enabled=self.runner.test_amp_cached):
+            while not glfw.window_should_close(self.window):
+                self.frame()
         self.shutdown()
 
     def frame(self):
@@ -258,20 +279,22 @@ class VolumetricVideoViewer:
         self.dynamic = dotdict()
 
         # should_render = glfw.get_window_attrib(self.window, glfw.FOCUSED) and self.H > 0 and self.W > 0 and self.camera.H > 0 and self.camera.W > 0
+        should_render = self.H > 0 and self.W > 0 and self.camera.H > 0 and self.camera.W > 0
 
         # Since our framebuffer is not the default framebuffer, the rendering commands will have no impact on the visual output of your window. For this reason it is called off-screen rendering when rendering to a different framebuffer.
         # It is also possible to bind a framebuffer to a read or write target specifically by binding to GL_READ_FRAMEBUFFER or GL_DRAW_FRAMEBUFFER respectively. The framebuffer bound to GL_READ_FRAMEBUFFER is then used for all read operations like glReadPixels and the framebuffer bound to GL_DRAW_FRAMEBUFFER is used as the destination for rendering, clearing and other write operations. Most of the times you won't need to make this distinction though and you generally bind to both with GL_FRAMEBUFFER.
 
-        # Render meshes (or point clouds)
-        if self.render_meshes:
-            for mesh in self.meshes:
-                mesh.render(self.camera)
+        if should_render:
+            # Render meshes (or point clouds)
+            if self.render_meshes:
+                for mesh in self.meshes:
+                    mesh.render(self.camera)
 
-        # Render network (forward)
-        if self.render_network:  # HACK: Will always render the first network stream
-            batch, output = self.render()
-            self.static.batch = batch
-            self.static.output = output
+            # Render network (forward)
+            if self.render_network:  # HACK: Will always render the first network stream
+                batch, output = self.render()
+                self.static.batch = batch
+                self.static.output = output
 
         # Render GUI
         self.draw_imgui(self.static.batch, self.static.output)  # defines GUI elements
@@ -283,48 +306,63 @@ class VolumetricVideoViewer:
     def render(self):
         # Perform dataloading and forward rendering
         gui_time = timer.record()
-        batch = self.camera.to_batch()
-        batch = self.dataset.get_viewer_batch(batch)
-        batch = add_iter(batch, self.iter, self.runner.total_iter)
-        data_time = timer.record()
 
-        batch = to_cuda(add_batch(batch))  # int -> tensor -> add batch -> cuda, smalle operations are much faster on cpu
+        # Preparing dataset for rendering
+        # if not len(self.static.batch):
+        batch = self.camera.to_batch(is_dataset=True)
+        batch = self.dataset.get_viewer_batch(batch, requires_bounds=self.model_requires_bounds)
+        # batch = add_iter(batch, self.iter, self.runner.total_iter)
+        batch = add_batch(batch) if self.model_requires_batch else batch
+        batch = to_cuda(batch) if self.model_requires_cuda else batch  # int -> tensor -> add batch -> cuda, smalle operations are much faster on cpu -> 1ms copy to cuda
         ctog_time = timer.record()
+        batch.iter = self.iter
+        batch.frac = self.iter / self.runner.total_iter
+
+        batch.meta.iter = batch.iter
+        batch.meta.frac = batch.frac
+        data_time = timer.record()
+        # else:
+        #     batch = self.static.batch
+        #     data_time = timer.record()
+        #     ctog_time = timer.record()
 
         # Forward pass
-        self.runner.maybe_jit_model(batch)
-        with torch.inference_mode(self.runner.test_using_inference_mode), torch.no_grad(), torch.cuda.amp.autocast(enabled=self.runner.test_use_amp, cache_enabled=self.runner.test_amp_cached):
-            try:
-                output = self.model(batch)
-            except Exception as e:
-                if isinstance(e, BdbQuit): raise e
-                if self.skip_exception:
-                    stacktrace()
-                    log(red(f'{type(e)}: {e} encountered when running forward pass, most likely a camera parameter issue, press `R` to to reset camera.'))
-                    return batch, dotdict()
-                else:
-                    raise e
+        try:
+            # output = dotdict()
+            output = self.model(batch)
+        except Exception as e:
+            if isinstance(e, BdbQuit): raise e
+            if self.skip_exception:
+                stacktrace()
+                log(red(f'{type(e)}: {e} encountered when running forward pass, most likely a camera parameter issue, press `R` to to reset camera.'))
+                return batch, dotdict()
+            else:
+                raise e
         model_time = timer.record()
 
-        # Filter contents and render to screen
-        image = self.runner.visualizer.generate_type(output, batch, self.visualization_type)[0][0]  # RGBA (should we use alpha?)
-        if self.exposure != 1.0 or self.offset != 0.0:
-            image = torch.cat([(image[..., :3] * self.exposure + self.offset), image[..., -1:]], dim=-1)  # add manual correction
-        if 'orig_h' in batch.meta:
-            x, y, w, h = batch.meta.crop_x[0].item(), batch.meta.crop_y[0].item(), batch.meta.W[0].item(), batch.meta.H[0].item()
-        else:
-            x, y, w, h = 0, 0, image.shape[1], image.shape[0]
-        if self.render_ratio != 1.0:
-            # NOTE: Principle: resize first (scaling), then crop (translation)
-            x, y, w, h = int(x / self.render_ratio), int(y / self.render_ratio), int(w / self.render_ratio), int(h / self.render_ratio)  # FIXME: Never will be an exact match of pixels
-            image = resize_image(image, size=(h, w)).contiguous()
-        image = (image.clip(0, 1) * 255).type(torch.uint8).flip(0)  # transform
-        self.image = image if self.render_alpha else image[..., :3]  # record the image for later use
+        upload_network = 'rgb_map' in output
+        if upload_network:
+            # Filter contents and render to screen
+            image = self.runner.visualizer.generate_type(output, batch, self.visualization_type)[0][0]  # RGBA (should we use alpha?)
+            if self.exposure != 1.0 or self.offset != 0.0:
+                image = torch.cat([(image[..., :3] * self.exposure + self.offset), image[..., -1:]], dim=-1)  # add manual correction
+            if 'orig_h' in batch.meta:
+                x, y, w, h = batch.meta.crop_x[0].item(), batch.meta.crop_y[0].item(), batch.meta.W[0].item(), batch.meta.H[0].item()
+            else:
+                x, y, w, h = 0, 0, image.shape[1], image.shape[0]
+            if self.render_ratio != 1.0:
+                # NOTE: Principle: resize first (scaling), then crop (translation)
+                x, y, w, h = int(x / self.render_ratio), int(y / self.render_ratio), int(w / self.render_ratio), int(h / self.render_ratio)  # FIXME: Never will be an exact match of pixels
+                image = resize_image(image, size=(h, w)).contiguous()
+            image = (image.clip(0, 1) * 255).type(torch.uint8).flip(0)  # transform
+            self.image = image if self.render_alpha else image[..., :3]  # record the image for later use
+
         post_time = timer.record()
 
-        # The blitting or quad drawing to move texture onto screen
-        self.quad.copy_to_texture(image, x, self.H - h - y, w, h)
-        self.quad.draw(x, self.H - h - y, w, h)
+        if upload_network:
+            # The blitting or quad drawing to move texture onto screen
+            self.quad.copy_to_texture(image, x, self.H - h - y, w, h)
+            self.quad.draw(x, self.H - h - y, w, h)
 
         gtos_time = timer.record()
 
@@ -377,7 +415,16 @@ class VolumetricVideoViewer:
     def draw_camera_gui(self, batch: dotdict = dotdict(), output: dotdict = dotdict()):
 
         # Camera controls
-        self.camera.t = imgui.slider_float('t', self.camera.t, 0, 1, format='%.6f')[1]  # temporal interpolation
+        timestamp = self.camera.t * self.dataset.duration
+        imgui.push_font(self.bold_font)
+        imgui.text('Timestamp & frame index:')
+        self.camera.t = imgui.slider_float(f'{timestamp:.3f} / {self.dataset.duration:.3f}###timestamp', timestamp, 0, self.dataset.duration, format='%.3f')[1] / self.dataset.duration  # temporal interpolation
+        frame_index = int(self.camera.t * OptimizableCamera.n_frames + 0.5)
+        changed, frame_index = imgui.slider_int(f'{frame_index} / {OptimizableCamera.n_frames}###frame_index', frame_index, 0, OptimizableCamera.n_frames)
+        if changed:
+            self.camera.t = frame_index / OptimizableCamera.n_frames
+        imgui.pop_font()
+
         if imgui.collapsing_header('Camera'):
             self.camera.mass = imgui.slider_float('Mass', self.camera.mass, 0.01, 1.0)[1]  # temporal interpolation
             self.camera.moment_of_inertia = imgui.slider_float('Moment of inertia', self.camera.moment_of_inertia, 0.01, 1.0)[1]  # temporal interpolation
@@ -428,14 +475,15 @@ class VolumetricVideoViewer:
 
             if imgui.tree_node_ex('Temporal'):
                 self.camera.v = imgui.slider_float('v', self.camera.v, 0, 1, format='%.6f')[1]  # spacial interpolation
-                self.camera.t = imgui.slider_float('t', self.camera.t, 0, 1, format='%.6f')[1]  # temporal interpolation
+                timestamp = self.camera.t * self.dataset.duration
+                self.camera.t = imgui.slider_float(f'{timestamp:.3f} / {self.dataset.duration:.3f} t###timestamp', timestamp, 0, self.dataset.duration, format='%.3f')[1] / self.dataset.duration  # temporal interpolation
                 imgui.push_item_width(self.static.slider_width * 0.33)
                 self.playing = imgui_toggle.toggle('Autoplay', self.playing, config=self.static.toggle_ios_style)[1]
                 imgui.same_line()
                 self.discrete_t = imgui_toggle.toggle('Discrete time', self.discrete_t, config=self.static.toggle_ios_style)[1]
                 imgui.pop_item_width()
                 if self.discrete_t: self.playing_fps = imgui.slider_int('Video FPS', self.playing_fps, 10, 120)[1]  # temporal interpolation
-                else: self.playing_speed = imgui.slider_float('Video speed', self.playing_speed, 0.0001, 0.01, format='%.6f')[1]  # temporal interpolation
+                else: self.playing_speed = imgui.slider_float('Video speed', self.playing_speed, 0.00001, 0.001, format='%.6f')[1]  # temporal interpolation
                 imgui.tree_pop()
 
         # Other updates
@@ -448,17 +496,25 @@ class VolumetricVideoViewer:
         # Other updates
         if self.playing:  # automatic update of temporal information
             if self.discrete_t:
-                old_prev_time = self.prev_time
+                old_prev_time = max(self.prev_time, 0)
                 self.prev_time = time.perf_counter()
-                self.acc_time += self.prev_time - old_prev_time  # time passed
+                diff = (self.prev_time - old_prev_time) if old_prev_time > 0 else 0
+                self.acc_time += diff  # time passed
+
                 frame_time = 1 / self.playing_fps  # desired frame time
+                interval = 1 / OptimizableCamera.n_frames
+                self.camera.t = int(self.camera.t / interval + 0.5) * interval  # only smaller
                 if self.acc_time >= frame_time:
-                    interval = (1 / self.dataset.frame_range) * (self.acc_time // frame_time)
+                    self.camera.t = (self.camera.t + interval * (self.acc_time // frame_time)) % 1
                     self.acc_time = self.acc_time % frame_time
-                    self.camera.t = (self.camera.t + interval) % 1
-                    self.camera.t = int(self.camera.t / interval + 0.5) * interval  # only smaller
             else:
+                self.acc_time = 0
+                self.prev_time = -1
                 self.camera.t = (self.camera.t + self.playing_speed) % 1
+        else:
+            if self.discrete_t:
+                self.prev_time = time.perf_counter()
+                self.acc_time = 0
 
     def draw_rendering_gui(self, batch: dotdict = dotdict(), output: dotdict = dotdict()):
 
@@ -602,6 +658,8 @@ class VolumetricVideoViewer:
             else: src_inds = None
             self.draw_cameras(Ks, Rs, Ts, proj, src_inds=src_inds, axis_size=self.camera_axis_size)
 
+            from easyvolcap.models.cameras.optimizable_camera import OptimizableCamera
+
             if 'optimized_camera' in self.static:
                 if hasattr(dataset, 'closest_using_t') and dataset.closest_using_t:
                     Ks = self.static.optimized_camera.Ks[batch.meta.view_index.item()]  # avoid erronous selections
@@ -614,7 +672,7 @@ class VolumetricVideoViewer:
 
                 self.draw_cameras(Ks, Rs, Ts, proj, default_color=0x50c0ffaa, bold_color=0xff8080ff, src_inds=src_inds, axis_size=self.camera_axis_size)
 
-            elif hasattr(self.model.camera, 'pose_resd'):
+            elif isinstance(self.model.camera, OptimizableCamera):
                 meta = dotdict()
                 meta.K = dataset.Ks.view(np.prod(dataset.Ks.shape[:2]), *dataset.Ks.shape[2:])
                 meta.R = dataset.Rs.view(np.prod(dataset.Rs.shape[:2]), *dataset.Rs.shape[2:])
@@ -637,7 +695,7 @@ class VolumetricVideoViewer:
 
         # Render debug bounding box out
         if self.visualize_bounds:
-            bounds = self.camera.bounds if 'bounds' not in batch.meta else batch.meta.bounds[0]
+            bounds = self.camera.bounds if 'bounds' not in batch.meta else (batch.meta.bounds[0] if len(batch.meta.bounds) == 1 else batch.meta.bounds)
             visualize_cube(proj, vec3(*bounds[0]), vec3(*bounds[1]), thickness=6.0)  # bounding box
 
         if self.visualize_axes:
@@ -646,7 +704,7 @@ class VolumetricVideoViewer:
 
     def draw_model_gui(self, batch: dotdict = dotdict(), output: dotdict = dotdict()):
 
-        if imgui.collapsing_header(f'Model & network'):
+        if imgui.collapsing_header(f'Model & Network'):
             if imgui.button('Reload model'):
                 try:
                     self.epoch = self.runner.load_network()
@@ -840,9 +898,7 @@ class VolumetricVideoViewer:
             us = self.camera_path.playing_time
             interp = self.camera_path.interp(us)
             if interp is not None:
-                H, W, K, R, T, n, f, t, v, bounds = interp
-                interp = dotdict(H=H, W=W, K=K, R=R, T=T, n=n, f=f, t=t, v=v, bounds=bounds)
-                self.camera.from_batch(interp)  # may return None
+                self.camera.from_batch(interp.to_batch())  # may return None
 
             # Update cursor when dragging the slider
             K = len(self.camera_path)
@@ -855,7 +911,7 @@ class VolumetricVideoViewer:
     def draw_mesh_gui(self, batch: dotdict = dotdict(), output: dotdict = dotdict()):
         from easyvolcap.utils.gl_utils import Mesh, Splat, Gaussian, PointSplat
 
-        if imgui.collapsing_header('Meshes & splats'):
+        if imgui.collapsing_header('Meshes & Splats'):
             if imgui.button('Add triangle mesh from file'):
                 self.static.add_mesh_dialog = pfd.open_file('Select file', filters=['PLY Files', '*.ply'])
                 self.static.render_type = Mesh.RenderType.TRIS
@@ -870,6 +926,7 @@ class VolumetricVideoViewer:
             if imgui.button('Add gaussian splat from file'):
                 self.static.add_mesh_dialog = pfd.open_file('Select file', filters=['3DGS Files', '*.ply *.npz *.pt *.pth'])
                 self.static.mesh_class = Gaussian
+
             if imgui.button('Add camera path visualization'):
                 self.static.add_mesh_dialog = pfd.select_folder('Select folder')
                 self.static.mesh_class = CameraPath
@@ -890,11 +947,12 @@ class VolumetricVideoViewer:
                     self.meshes.append(mesh)
                 self.static.add_mesh_dialog = None
 
-            will_delete = []
+            batch = dotdict(will_delete=[], slider_width=self.static.slider_width)
             for i, mesh in enumerate(self.meshes):
-                mesh.render_imgui(viewer=self, batch=dotdict(i=i, will_delete=will_delete, slider_width=self.static.slider_width))
+                batch.i = i
+                mesh.render_imgui(viewer=self, batch=batch)
 
-            for i in will_delete:
+            for i in batch.will_delete:
                 del self.meshes[i]
 
     def draw_debug_gui(self, batch: dotdict = dotdict(), output: dotdict = dotdict()):
@@ -915,7 +973,7 @@ class VolumetricVideoViewer:
 
         # Misc information
         imgui.push_font(self.bold_font)
-        imgui.text(f'EasyVolcap Framework -- by zju3dv')
+        # imgui.text(f'EasyVolcap Framework -- by zju3dv') # be anonymous
         imgui.text(f'Running on {self.static.name}: {self.static.device}')
         imgui.text(f'FPS       : {self.static.fps:7.3f} FPS')
         tooltip('This is the 20 frame average fps instead of per frame')
@@ -937,17 +995,17 @@ class VolumetricVideoViewer:
 
         if not timer.disabled:
             if imgui.collapsing_header('Timing'):
-                imgui.text(f'gui  : {batch.gui_time * 1000:7.3f}ms')
+                imgui.text(f'gui  : {batch.get("gui_time", -1) * 1000:7.3f}ms')
                 tooltip('Time for every other GUI elements (imgui & meshes & cameras & bounds) of previous frame')
-                imgui.text(f'data : {batch.data_time * 1000:7.3f}ms')
+                imgui.text(f'data : {batch.get("data_time", -1) * 1000:7.3f}ms')
                 tooltip('Time for extracting data from GUI & pass through dataset wrapper')
-                imgui.text(f'ctog : {batch.ctog_time * 1000:7.3f}ms')
+                imgui.text(f'ctog : {batch.get("ctog_time", -1) * 1000:7.3f}ms')
                 tooltip('Time for move batch data from CPU RAM to GPU VRAM (limited by PCIe bandwidth)')
-                imgui.text(f'model: {batch.model_time * 1000:7.3f}ms')
+                imgui.text(f'model: {batch.get("model_time", -1) * 1000:7.3f}ms')
                 tooltip('Time for forwarding the underlying model, this should dominate')
-                imgui.text(f'post : {batch.post_time * 1000:7.3f}ms')
+                imgui.text(f'post : {batch.get("post_time", -1) * 1000:7.3f}ms')
                 tooltip('Time for post processing of the rendered image got from the model')
-                imgui.text(f'gtos : {batch.gtos_time * 1000:7.3f}ms')
+                imgui.text(f'gtos : {batch.get("gtos_time", -1) * 1000:7.3f}ms')
                 tooltip('Time for blitting the rendered content from torch.Tensor to screen of previous frame')
 
     def draw_menu_gui(self, batch: dotdict = dotdict(), output: dotdict = dotdict()):
@@ -958,7 +1016,8 @@ class VolumetricVideoViewer:
 
             if imgui.begin_menu('Edit', True):
                 if imgui.menu_item('Quit Viewer', 'Ctrl+Q', False, True)[0]:
-                    exit(1)
+                    self.shutdown()
+                    exit(0)
 
                 if imgui.menu_item('Toggle Fullscreen', 'F11', False, True)[0]:
                     self.toggle_fullscreen()
@@ -1057,6 +1116,7 @@ class VolumetricVideoViewer:
 
         if (action == glfw.PRESS or action == glfw.REPEAT) and key == glfw.KEY_Q and CONTROL:
             self.shutdown()
+            exit(0)
 
         elif (action == glfw.PRESS or action == glfw.REPEAT) and key == glfw.KEY_S and CONTROL:
             self.printscreen()
@@ -1186,11 +1246,11 @@ class VolumetricVideoViewer:
 
         elif ((action == glfw.PRESS or action == glfw.REPEAT) or action == glfw.REPEAT) and key == glfw.KEY_LEFT:
             # Backup one frame
-            self.camera.t = np.clip(self.camera.t - 1 / self.dataset.frame_range, 0, 1)
+            self.camera.t = np.clip(self.camera.t - 1 / OptimizableCamera.n_frames, 0, 1)
 
         elif ((action == glfw.PRESS or action == glfw.REPEAT) or action == glfw.REPEAT) and key == glfw.KEY_RIGHT:
             # Advance one frame
-            self.camera.t = np.clip(self.camera.t + 1 / self.dataset.frame_range, 0, 1)
+            self.camera.t = np.clip(self.camera.t + 1 / OptimizableCamera.n_frames, 0, 1)
 
         elif ((action == glfw.PRESS or action == glfw.REPEAT) or action == glfw.REPEAT) and key >= glfw.KEY_0 and key <= glfw.KEY_9 and CONTROL:
             # Snap to input camera
@@ -1262,6 +1322,9 @@ class VolumetricVideoViewer:
 
     def reset(self):
         self.init_camera(self.camera_cfg, self.init_camera_index)
+        W, H = self.W, self.H
+        self.window_size = self.init_window_size
+        self.glfw_framebuffer_size_callback(None, W, H)
         self.playing = False
         self.exposure = 1.0
         self.offset = 0.0
@@ -1322,7 +1385,7 @@ class VolumetricVideoViewer:
         ori_W = self.W
         self.H = height
         self.W = width
-        if ori_W > 0 and ori_H > 0:
+        if ori_W > 0 and ori_H > 0 and height > 0 and width > 0:
             ratio = min(self.W / ori_W, self.H / ori_H)
             self.camera.K[0, 0] *= ratio   # only update one of them
             self.camera.K[1, 1] *= ratio   # only update one of them
@@ -1391,6 +1454,8 @@ class VolumetricVideoViewer:
 
         else:
             # Select dataset camera
+            camera_cfg.pop('R', None)
+            camera_cfg.pop('T', None)
             R, T = dataset.Rs[view_index, 0], dataset.Ts[view_index, 0]
 
         n = camera_cfg.pop('n', dataset.near)
@@ -1452,6 +1517,10 @@ class VolumetricVideoViewer:
         self.italic_font = io.fonts.add_font_from_file_ttf(self.font_italic, self.font_size)
         self.bold_font = io.fonts.add_font_from_file_ttf(self.font_bold, self.font_size)
 
+        self.default_font_large = io.fonts.add_font_from_file_ttf(self.font_default, self.font_size * 1.25)
+        self.italic_font_large = io.fonts.add_font_from_file_ttf(self.font_italic, self.font_size * 1.25)
+        self.bold_font_large = io.fonts.add_font_from_file_ttf(self.font_bold, self.font_size * 1.25)
+
         # # Markdown initialization
         # options = imgui_md.MarkdownOptions()
         # # options.font_options.font_base_path = 'assets/fonts'
@@ -1486,6 +1555,8 @@ class VolumetricVideoViewer:
             glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 0)
             # glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE) # // 3.2+ only
             # glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, GL_TRUE)
+
+        # glfw.window_hint(glfw.TRANSPARENT_FRAMEBUFFER, 1);
 
         # Create a windowed mode window and its OpenGL context
         window = glfw.create_window(self.W, self.H, self.window_title, None, None)

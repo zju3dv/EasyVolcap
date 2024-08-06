@@ -42,26 +42,12 @@ if TYPE_CHECKING:
     from easyvolcap.runners.volumetric_video_viewer import VolumetricVideoViewer
     from easyvolcap.models.networks.multilevel_network import MultilevelNetwork
 
-from pytorch3d.io import load_ply
-from pytorch3d.ops import knn_points, ball_query, sample_farthest_points
-from pytorch3d.structures import Pointclouds
-from pytorch3d.renderer.points.pulsar import Renderer as Pulsar
-from pytorch3d.renderer.points.rasterizer import PointFragments, rasterize_points
-from pytorch3d.renderer import (
-    PerspectiveCameras,
-    PointsRasterizationSettings,
-    PointsRenderer,
-    PointsRasterizer,
-    AlphaCompositor,
-    NormWeightedCompositor,
-    PulsarPointsRenderer
-)
-
 
 @SAMPLERS.register_module()
 class PointPlanesSampler(VolumetricVideoModule):
-    n_frames = OptimizableCamera.n_frames
-    frame_sample = OptimizableCamera.frame_sample
+
+    n_frames = OptimizableCamera.n_views if OptimizableCamera.closest_using_t else OptimizableCamera.n_frames
+    frame_sample = OptimizableCamera.view_sample if OptimizableCamera.closest_using_t else OptimizableCamera.frame_sample
 
     def __init__(self,
                  network: VolumetricVideoNetwork,
@@ -144,8 +130,6 @@ class PointPlanesSampler(VolumetricVideoModule):
         self.bg_brightness = bg_brightness
 
         # Renderer related
-        self.compositor = AlphaCompositor()  # this the key to convergence
-        self.rasterizer = PointsRasterizer()
         self.use_pulsar = use_pulsar
         self.use_diffgl = use_diffgl
         self.use_cudagl = use_cudagl
@@ -382,6 +366,7 @@ class PointPlanesSampler(VolumetricVideoModule):
                       ):
         # Maybe apply action on batched pcds
         if with_batch:
+            from pytorch3d.structures import Pointclouds
             pcds: Pointclouds = Pointclouds([p.data for p in self.pcds])  # batched point clouds
             pcd_news = time_function()(function)(pcds.points_padded(), pcds.num_points_per_cloud())
 
@@ -418,6 +403,7 @@ class PointPlanesSampler(VolumetricVideoModule):
             self.max_H = max(self.max_H, H)
             self.max_W = max(self.max_W, W)
             log(green(f'Initializing pulsar renderer for shape (H, W): {self.max_H}, {self.max_W}'))
+            from pytorch3d.renderer.points.pulsar import Renderer as Pulsar
             self.pulsar = Pulsar(self.max_W, self.max_H, max_num_balls=self.n_points, n_channels=5, n_track=self.pts_per_pix).to('cuda', non_blocking=True)
 
     def render_points(self, *args, **kwargs):
@@ -432,12 +418,25 @@ class PointPlanesSampler(VolumetricVideoModule):
         if self.use_pulsar: return self.render_pulsar(*args, **kwargs)
         else: return self.render_pytorch(*args, **kwargs)
 
+    def prepare_pytorch(self):
+        if not hasattr(self, 'compositor') or not hasattr(self, 'rasterizer'):
+            from pytorch3d.renderer.points.rasterizer import rasterize_points
+            from pytorch3d.renderer import PerspectiveCameras, PointsRasterizer, AlphaCompositor
+            self.compositor = AlphaCompositor()  # this the key to convergence
+            self.rasterizer = PointsRasterizer()
+
     def render_pytorch(self,
                        pcd: torch.Tensor, rgb: torch.Tensor, rad: torch.Tensor, occ: torch.Tensor,
                        batch: dotdict,
                        return_frags: bool = False,
                        return_full: bool = False,
                        ):
+        from pytorch3d.structures import Pointclouds
+        from pytorch3d.renderer.points.rasterizer import rasterize_points
+        from pytorch3d.renderer import PerspectiveCameras, PointsRasterizer, AlphaCompositor
+
+        self.prepare_pytorch()
+
         # Pytorch3d weirdness
         pcd, rgb, rad, occ = pcd.float(), rgb.float(), rad.float(), occ.float()
 

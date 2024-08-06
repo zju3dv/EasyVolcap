@@ -7,6 +7,7 @@ from scipy.spatial.transform import Rotation
 
 from easyvolcap.utils.console_utils import *
 from easyvolcap.utils.base_utils import dotdict
+from easyvolcap.utils.easy_utils import write_camera
 
 
 def parse_unity_msg(msg):
@@ -97,7 +98,7 @@ def unity_qt2opencv_w2c(quanternion: np.ndarray,
                         scale: float = 1.0,
                         ):
     """ Decode the quaternion vector and translation vector from Unity into w2c.
-        This is a simplest conversion function only changes from Unity to Easyvolcap.
+        This is a simplest conversion function only changes from Unity to EasyVolcap.
     Args:
         translation: (np.ndarray), (3,), translation vector from Unity.
         quaternion: (np.ndarray), (4,), quaternion vector from Unity.
@@ -184,7 +185,7 @@ def decode_single_unity_pose(quanternion: np.ndarray,
     Args:
         translation: (np.ndarray), (3,), translation vector from Unity, only used to get original w2c.
         quaternion: (np.ndarray), (4,), quaternion vector from Unity.
-        transformation: (np.ndarray), (4, 4), no use in this version of decoding function.
+        transformation: (np.ndarray), (4, 4), transformation matrix for rotation only.
         origin: (np.ndarray), (3,), the fixed w2c translation vector.
         scale: (float), the scale of the scene.
     Return:
@@ -192,24 +193,24 @@ def decode_single_unity_pose(quanternion: np.ndarray,
     """
     # Perform coordinates conversion first
     w2c = unity_qt2opencv_w2c(quanternion, translation, scale)
+    # Transform the direction of the w2c first
+    w2c = transformation @ w2c
     # Fix the w2c translation vector
     w2c[:3, 3] = origin
-    # `w2c @ transformation` is equal to `transformation @ Pw`
-    w2c = w2c @ transformation
     # Convert the w2c into torch.Tensor
     w2c = torch.as_tensor(w2c).float()  # (4, 4)
     return w2c
 
 
 def decode_single_unity_proj_mats(k1, k2, k3, k4, H, W):
-    """ Decode the projection matrix of Unity to camera intrinsic of Easyvolcap.
+    """ Decode the projection matrix of Unity to camera intrinsic of EasyVolcap.
     Args:
         k1: (float), the [0, 0] element of the projection matrix, should equals to 2 * fx / W.
         k2: (float), the [0, 2] element of the projection matrix, should equals to 1 - 2 * cx / W.
         k3: (float), the [1, 1] element of the projection matrix, should equals to 2 * fy / H.
         k4: (float), the [1, 2] element of the projection matrix, should equals to 2 * cy / H - 1.
     Returns:
-        K: (torch.Tensor), (3, 3), the camera intrinsic matrix of Easyvolcap.
+        K: (torch.Tensor), (3, 3), the camera intrinsic matrix of EasyVolcap.
     """
     fx = k1 * W / 2.
     cx = (1 - k2) * W / 2.
@@ -253,8 +254,6 @@ def decode_stereo_unity_poses(data, transformation: np.ndarray, origin: np.ndarr
         w2cR: (torch.Tensor), (4, 4), the world2camera extrinsic matrix of the right camera.
     """
     signal = int(data.signal)
-    # print("quaternionL: ", data.quaternionL, ", positionL: ", data.positionL, ", projMatL: ", data.projMatL)
-    # print("quaternionR: ", data.quaternionR, ", positionR: ", data.positionR, ", projMatR: ", data.projMatR)
     w2cL = decode_single_unity_pose(data.quaternionL, data.positionL, transformation, origin, scale)  # (4, 4)
     w2cR = decode_single_unity_pose(data.quaternionR, data.positionR, transformation, origin, scale)  # (4, 4)
     # # FIXME: cannot perform recify here since we fix the camera intrinsic (but SRD will adjust the camera intrinsic according to pose)
@@ -331,3 +330,18 @@ def log_stereo_params(w2cL, w2cR, KL, KR):
     print(w2cR)
     print(KL)
     print(KR)
+
+
+def record_tracked_poses(camL: dotdict, camR: dotdict, path: str):
+    """ Record the tracked poses of the left eye and the right eye into a txt file.
+    Args:
+        camL: (dotdict), the tracked poses of the left eye.
+        camR: (dotdict), the tracked poses of the right eye.
+        path: (str), the path to save the tracked poses.
+    Returns:
+        None
+    """
+    # Record the tracked poses of the left eye and the right eye
+    write_camera(camL, os.path.join(path, 'left'))
+    write_camera(camR, os.path.join(path, 'right'))
+    exit(0)

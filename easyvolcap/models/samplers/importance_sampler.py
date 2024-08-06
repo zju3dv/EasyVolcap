@@ -24,6 +24,7 @@ class ImportanceSampler(UniformSampler):
                  network: MultilevelNetwork,
                  n_samples: List[int] = [64, 64, 64],  # number of samples per-round
                  fine_freespace_ratio: float = 0.25,  # number of random samples # FIXME: DO NOT SET TO ABOVE ZERO, not implemented to insert into samples
+                 concat_coarse_samples: bool = False,  # nerf-like importance sampling stuff
 
                  normalize_weight: bool = True,  # these will lead to inconvergence...
                  dilate_weight: bool = False,  # these will lead to inconvergence...
@@ -45,6 +46,7 @@ class ImportanceSampler(UniformSampler):
         self.n_samples = n_samples
         self.n_freespace = int(n_samples[-1] * fine_freespace_ratio)
         self.n_samples[-1] -= self.n_freespace  # last level performs some random sampling too
+        self.concat_coarse_samples = concat_coarse_samples
 
         self.normalize_weight = normalize_weight
         self.dilate_weight = dilate_weight
@@ -109,8 +111,16 @@ class ImportanceSampler(UniformSampler):
 
                 # On consecutive rounds, we need to recompute the weights
                 # according to mipnerf360
-                s_vals = importance_sampling(s_vals, weights, n_samples, perturb=self.training)  # 0 -> B, P, S,
-                z_vals = s_vals_to_z_vals(s_vals, near, far, g=self.g, ig=self.ig)
+                s_vals_pdf = importance_sampling(s_vals, weights, n_samples, perturb=self.training)  # 0 -> B, P, S,
+                z_vals_pdf = s_vals_to_z_vals(s_vals_pdf, near, far, g=self.g, ig=self.ig)
+
+                # Some methods may need to concat the coarse level samples
+                if self.concat_coarse_samples:
+                    s_vals = torch.cat([s_vals, s_vals_pdf], dim=-1).sort(dim=-1)[0]  # near to far, B, P, S'
+                    z_vals = torch.cat([z_vals, z_vals_pdf], dim=-1).sort(dim=-1)[0]  # near to far, B, P, S'
+                else:
+                    s_vals = s_vals_pdf  # B, P, S
+                    z_vals = z_vals_pdf  # B, P, S
 
             # Compute weights (rgb, occ, volume rendering)
             # Perform volume rendering on last but not least round

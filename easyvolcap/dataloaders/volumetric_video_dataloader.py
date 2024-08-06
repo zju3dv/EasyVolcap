@@ -29,6 +29,7 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 
 def worker_init_fn(worker_id, fix_random, allow_tf32, deterministic, benchmark):
     cv2.setNumThreads(1)  # only 1 thread for opencv undistortion, high cpu, not faster
+    # torch.set_num_threads(1)  # only 1 thread for torch, high cpu, not faster
     setup_deterministic(fix_random, allow_tf32, deterministic, benchmark, worker_id)
 
     worker_info = get_worker_info()
@@ -73,7 +74,7 @@ class VolumetricVideoDataloader(DataLoader):
     # NOTE: order for arguments: constructed objects, default configurations, default arguments
     def __init__(self,
                  # Dataloader configs
-                 num_workers: int = 4,  # heavy on cpu, reduce memory usage
+                 num_workers: int = 8,  # heavy on cpu, reduce memory usage
                  prefetch_factor: int = 2,  # heavy on cpu, reduce memory usage
                  pin_memory: bool = True,  # heavy on memory
                  max_iter: int = cfg.runner_cfg.ep_iter * cfg.runner_cfg.epochs,  # MARK: global config

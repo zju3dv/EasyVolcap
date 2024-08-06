@@ -1,0 +1,29 @@
+configs: configs/datasets/selfcap/selfcap.yaml # inherit from this config
+dataloader_cfg:
+    dataset_cfg: &dataset_cfg
+        data_root: data/selfcap/410
+        near: 0.1
+        far: 20.0
+        scene_scale: 1.0
+        bounds: [[-15., -10., -3.], [10., 10., 25.]]
+
+val_dataloader_cfg:
+    dataset_cfg:
+        <<: *dataset_cfg
+
+viewer_cfg:
+    camera_cfg:
+        world_up: [0, -1, 0]
+        
+        K: [[3080., 0., 1080.], [0., 3086., 1920.], [0., 0., 1.]]
+        R: [[0.9726612385, -0.1087822575, 0.2051744027], [0.0439165582, 0.9537222528, 0.2974646204], [-0.2280382665, -0.2803217525, 0.9324260100]]
+        T: [[0.5307248772], [-0.1203192453], [1.1166826430]]
+
+        movement_speed: 10.0
+        movement_force: 10.0
+        
+        n: 0.1
+        f: 10.0
+        
+        H: 1024
+        W: 1024

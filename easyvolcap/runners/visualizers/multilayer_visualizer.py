@@ -7,10 +7,12 @@ from multiprocessing.pool import ThreadPool
 
 from easyvolcap.engine import cfg  # global
 from easyvolcap.engine import VISUALIZERS
-from easyvolcap.runners.visualizers.volumetric_video_visualizer import VolumetricVideoVisualizer
-from easyvolcap.utils.console_utils import *
 from easyvolcap.engine.registry import call_from_cfg
+from easyvolcap.runners.visualizers.volumetric_video_visualizer import VolumetricVideoVisualizer
+
+from easyvolcap.utils.console_utils import *
 from easyvolcap.utils.base_utils import dotdict
+from easyvolcap.utils.parallel_utils import parallel_execution
 from easyvolcap.utils.data_utils import save_image, generate_video, Visualization
 
 
@@ -42,6 +44,13 @@ class MultilayerVisualizer(VolumetricVideoVisualizer):  # this should act as a b
         return image_stats
 
     def summarize(self):
+        for stream, buffer in zip(self.cuda_streams, self.cpu_buffers):
+            stream.synchronize()  # wait for the copy in this stream to finish
+            img_paths, img_arrays = buffer
+            img_arrays = [im.numpy() for im in img_arrays]
+            pool = parallel_execution(img_paths, img_arrays, action=save_image, async_return=True, num_workers=3)  # actual writing to disk (async)
+            self.thread_pools.append(pool)
+
         for pool in self.thread_pools:  # finish all pending taskes before generating videos
             pool.close()
             pool.join()
@@ -49,21 +58,22 @@ class MultilayerVisualizer(VolumetricVideoVisualizer):  # this should act as a b
 
         for type in self.types:
             self.img_pattern = f'{{type}}/frame{{frame:04d}}_camera{{camera:04d}}{self.vis_ext}'
-            result_dir = dirname(join(self.result_dir, self.img_pattern))\
-                .format(type=type.name, camera=self.camera, frame=self.frame)
+            result_dir = dirname(join(self.result_dir, self.img_pattern)).format(type=type.name, camera=self.camera, frame=self.frame)
             result_str = f'"{result_dir}/*{self.vis_ext}"'
-
-            output_path = generate_video(result_str, self.video_fps)  # one video for one type?
+            output_path = result_str[1:].split('*')[0][:-1] + '.mp4'
+            generate_video(result_str, output_path, self.video_fps)  # one video for one type?
             log(f'Video generated: {yellow(output_path)}')
 
             # Generate video for each layer
             for i in range(self.num_layers):
                 self.img_pattern = f'LAYER_{i}/{{type}}/frame{{frame:04d}}_camera{{camera:04d}}{self.vis_ext}'
-                result_dir = dirname(join(self.result_dir, self.img_pattern))\
-                    .format(type=type.name, camera=self.camera, frame=self.frame)
+                result_dir = dirname(join(self.result_dir, self.img_pattern)).format(type=type.name, camera=self.camera, frame=self.frame)
                 result_str = f'"{result_dir}/*{self.vis_ext}"'
-
-                output_path = generate_video(result_str, self.video_fps)
+                output_path = result_str[1:].split('*')[0][:-1] + '.mp4'
+                output_path = generate_video(result_str, output_path, self.video_fps)
                 log(f'Video generated: {yellow(output_path)}')
 
-            # TODO: use timg to visaulize the video / image on disk to the commandline
+        if self.verbose:
+            types = '{' + ','.join([t.name for t in self.types]) + '}'
+            log(yellow(f'Visualization output: {blue(join(self.result_dir, dirname(self.img_pattern).format(type=types)))}'))  # use yellow for output path
+        return dotdict()

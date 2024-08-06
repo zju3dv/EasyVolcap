@@ -43,7 +43,7 @@ from easyvolcap.utils.enerf_utils import MinCostRegNet, CostRegNet, FeatureNet
 @SAMPLERS.register_module()
 class CostVolumeSampler(UniformSampler):
     def __init__(self,
-                 network: MultilevelNetwork,
+                 network: MultilevelNetwork = None,
 
                  feat_cfg: dotdict = dotdict(type=FeatureNet.__name__),
                  cost_reg_cfgs: List[dotdict] = [
@@ -168,14 +168,14 @@ class CostVolumeSampler(UniformSampler):
             src_scale_cpu = torch.as_tensor([Ws / Wp, Hs / Hp])[..., None]  # 2, 1
 
             # Let's have a look at all three scaling factors to better understand how it operates:
-            # 1. [*]vol_scales_guide = [0.125, 0.5]: resolution of the cost volume, namely the scaling factor of the target image since cost volume is built upon the target camera frustrum.
+            # 1. [*]vol_scales_guide = [0.125, 0.5]: resolution of the cost volume, namely the scaling factor of the target image since cost volume is built upon the target camera frustum.
             # 2. [*]img_scales_guide = [ 0.25, 0.5]: resolution of the feature maps, namely the resolution of the first and second level of the feature pyramid(`src_feats`), the cost volume is built by first projecting the `vol_scales_guide = [0.125, 0.5]` scaled 2d target pixels into the corresponding 2d source feature pyramid of resolution `[0.25, 0.5]`, and then interpolating the corresponding feature pyramid as its local feature, finally compute the feature average and variance alongside S dim.
             # 3. [*]ren_scales_guide = [ 0.25, 1.0]: resolution of the rendering image results for each level
             # So, now it is much more clear why ENeRF needs three scaling factors, especially the previous two, `vol_scales_guide` and `vol_scales_guide`.
 
             # Depth plane sampling: 0, 1 sampling -> near far plane sampling
             if level == 0:
-                # Volume built on camera frustrum
+                # Volume built on camera frustum
                 near_plane = near.min(dim=-2)[0][..., None, None, :]  # B, P, 1 -> B, 1, 1, 1
                 far_plane = far.max(dim=-2)[0][..., None, None, :]  # B, P, 1 -> B, 1, 1, 1
             else:
@@ -202,6 +202,11 @@ class CostVolumeSampler(UniformSampler):
             # Sample actual depth for network forward
             near = (depth - std)[:, None].clip(near_plane, far_plane)  # B, 1, Ht, Wt, maybe disp depth range
             far = (depth + std)[:, None].clip(near_plane, far_plane)  # B, 1, Ht, Wt, maybe disp depth range
+
+            # TODO: Tidy this up
+            if 'depth_probs_prop' not in output:
+                output.depth_probs_prop = []
+            output.depth_probs_prop.append(depth_prob)  # for supervision of coarse network
 
             if (not self.training or not self.render_if[level]) and level != len(self.n_samples) - 1: continue  # only perform multi-level depth sampling if training and requires render
 
@@ -239,6 +244,7 @@ class CostVolumeSampler(UniformSampler):
 
             # For proposal loss (also need rendered weights)
             output.feat_vol = feat_vol  # B, C, D, Ht, Wt
+            output.depth_prob = depth_prob  # B, D, Ht, Wt
             output.src_feat_rgb = src_feat_rgb  # B, S, C, Hr, Wr
             output.s_vals = s_vals  # B, P, N
             output.z_vals = z_vals  # B, P, N

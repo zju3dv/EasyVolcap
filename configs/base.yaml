@@ -12,6 +12,7 @@ profiler_cfg:
     enabled: False # no profiling by default
 print_model: False # defaults to a compact interface
 preparing_parser: False
+print_parameters: True
 
 # Top level model building
 model_cfg:
@@ -120,6 +121,7 @@ val_dataloader_cfg: # we see the term "dataloader" a one word?
 runner_cfg: &runner_cfg
     type: VolumetricVideoRunner
     epochs: 400
+    # decay_epochs: 400
     ep_iter: 500
     optimizer_cfg:
         type: ConfigurableOptimizer

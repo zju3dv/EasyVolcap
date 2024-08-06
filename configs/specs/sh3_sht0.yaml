@@ -1,0 +1,7 @@
+model_cfg:
+    network_cfg: &network_cfg
+        sh_deg: 3
+        sh_deg_t: 0
+
+    sampler_cfg:
+        <<: *network_cfg

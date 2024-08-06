@@ -24,12 +24,32 @@ git diff ~/miniconda3/envs/easyvolcap/lib/python3.10/site-packages/OpenGL ~/mini
 echo "c.TerminalInteractiveShell.autosuggestions_provider = 'AutoSuggestFromHistory'" >> $HOME/.ipython/profile_default/ipython_config.py
 ```
 
+### Debug Memory Usage
+
 ```python
 # Memory usage analysis
 from pytorch_memlab import MemReporter
 reporter = MemReporter(self)
 reporter.report()
+```
 
+Make memory reporter print to a file:
+
+```python
+import builtins
+from functools import partial
+builtins.print = partial(print, file=open('memory.txt', 'w'))
+```
+
+### Debug Memory Leak Using `weakref`
+
+```python
+
+```
+
+### Check Model Graph
+
+```python
 # Save model graph
 from torchviz import make_dot
 dot = make_dot(loss, dict(self.model.network.named_parameters()), show_attrs=True, show_saved=True)

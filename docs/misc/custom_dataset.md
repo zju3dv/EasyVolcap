@@ -177,6 +177,10 @@ python scripts/tools/visualize_cameras.py --data_root ${data_root}/optimized
 
 ## Video to Images
 
+```shell
+# Rearrange raw movies into their corresponding directories
+```
+
 Videos should be arranged like this before extracting images from it:
 
 ```shell
@@ -190,7 +194,8 @@ data/dataset/sequence # data_root & data_root
 Extraction command:
 
 ```shell
-python scripts/preprocess/extract_videos.py --data_root ${data_root}
+# python scripts/preprocess/extract_videos.py --data_root ${data_root}
+# TODO: Use ffmpeg and configure size, ext, quality etc
 ```
 
 ## Segmentation

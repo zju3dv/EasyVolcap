@@ -1,0 +1,18 @@
+configs:
+    - configs/exps/l3mhet/l3mhet_seq3.yaml
+    - configs/specs/static.yaml
+
+common: &common
+    frame_sample: [0, 1, 1] # only one frame
+
+dataloader_cfg:
+    dataset_cfg:
+        <<: *common
+        view_sample: [0, null, 1] # use all available views
+
+val_dataloader_cfg:
+    dataset_cfg:
+        <<: *common
+
+# prettier-ignore
+exp_name: {{fileBasenameNoExtension}}

@@ -1,3 +1,7 @@
+"""
+convert a text colmap export to nerf format transforms.json; optionally convert video to images, and optionally run colmap in the first place
+"""
+
 import os
 import cv2
 import shutil
@@ -18,23 +22,34 @@ def parse_args():
     ffmpeg -i videos/00/IMG_6476.MOV -vf "fps=4,scale=1920:1080" -q:v 1 -qmin 1 -start_number 0 images/00/%06d.jpg
     ffmpeg -i videos/00/IMG_7348.MOV -vf "fps=30" -q:v 1 -qmin 1 -start_number 0 images/00/%06d.jpg
     """
-    parser = argparse.ArgumentParser(description="convert a text colmap export to nerf format transforms.json; optionally convert video to images, and optionally run colmap in the first place")
-    parser.add_argument("--colmap_db", default="colmap/colmap.db", help="colmap database filename")
-    parser.add_argument("--colmap_matcher", default="sequential", choices=["exhaustive", "sequential", "spatial", "transitive", "vocab_tree"], help="select which matcher colmap should use. sequential for videos, exhaustive for adhoc images")
-    parser.add_argument("--colmap_camera_model", default="OPENCV", choices=["SIMPLE_PINHOLE", "PINHOLE", "SIMPLE_RADIAL", "RADIAL", "OPENCV"], help="camera model")
-    parser.add_argument("--colmap_camera_params", default="", help="intrinsic parameters, depending on the chosen model.  Format: fx, fy, cx, cy, dist")
 
-    parser.add_argument('--data_root', default='data/zju/ip412')
-    parser.add_argument("--mask", default="mask/00", help="input path to the mask")
-    parser.add_argument("--images", default="images/00", help="input path to the images")
-    parser.add_argument("--bkgd_mask", default="bkgd_mask/00", help="input path to the mask")
-    parser.add_argument('--bkgd_mask_dilation', default=20, type=int)
+    args = dotdict(
+        colmap_db=dotdict(default="colmap/colmap.db", help="colmap database filename"),
+        colmap_matcher=dotdict(default="sequential", choices=["exhaustive", "sequential", "spatial", "transitive", "vocab_tree"], help="select which matcher colmap should use. sequential for videos, exhaustive for adhoc images"),
+        colmap_camera_model=dotdict(default="OPENCV", choices=["SIMPLE_PINHOLE", "PINHOLE", "SIMPLE_RADIAL", "RADIAL", "OPENCV"], help="camera model"),
+        colmap_camera_params=dotdict(default="", help="intrinsic parameters, depending on the chosen model.  Format: fx, fy, cx, cy, dist"),
+        no_colmap_single_camera=dotdict(action='store_false', dest='colmap_single_camera'),
 
-    parser.add_argument("--text", default="text", help="input path to the colmap text files (set automatically if run_colmap is used)")
-    parser.add_argument("--ply", default="ply", help="output sparse reconstruction results")
-    parser.add_argument("--vocab_path", default="", help="vocabulary tree path")
+        data_root=dotdict(default='data/zju/ip412'),
+        mask=dotdict(default="mask/00", help="input path to the mask"),
+        images=dotdict(default="images/00", help="input path to the images"),
+        bkgd_mask=dotdict(default="bkgd_mask/00", help="input path to the mask"),
+        bkgd_mask_dilation=dotdict(default=20, type=int),
 
-    args = parser.parse_args()
+        ba_global_max_num_iterations=dotdict(default=20, type=int),
+        ba_global_max_refinements=dotdict(default=3, type=int),
+        max_num_iterations=dotdict(default=20, type=int),
+
+        text=dotdict(default="text", help="input path to the colmap text files (set automatically if run_colmap is used)"),
+        ply=dotdict(default="ply", help="output sparse reconstruction results"),
+        vocab_path=dotdict(default="", help="vocabulary tree path"),
+
+        use_glomap=dotdict(action='store_true'),
+        use_gpu=dotdict(action='store_true'),
+
+    )
+    args = dotdict(vars(build_parser(args, description=__doc__).parse_args()))
+
     args.mask = join(args.data_root, args.mask)
     args.images = join(args.data_root, args.images)
     args.colmap_db = join(args.data_root, args.colmap_db)
@@ -82,10 +97,12 @@ def run_colmap(args):
     ply = args.ply
     text = args.text
     sparse = db_noext + "_sparse"
+    dense = sparse.replace('sparse', 'dense')
 
     log(f"running colmap with:\n\tdb={db}\n\timages={images}\n\tsparse={sparse}\n\ttext={text}")
     if os.path.isdir(sparse) or os.path.isdir(text) or os.path.isfile(db):  # be caring
-        if (input(yellow(f"warning! '{red(sparse)}' '{red(text)}' and '{red(db)}' will be deleted/replaced. continue? (Y/n) ")).lower().strip() + "y")[:1] != "y":
+        print(yellow(f"warning! '{red(sparse)}' '{red(text)}' and '{red(db)}' will be deleted/replaced. continue? (Y/n) "), end='')
+        if (input().lower().strip() + "y")[:1] != "y":
             sys.exit(1)
         try:
             os.remove(db)
@@ -101,10 +118,16 @@ def run_colmap(args):
 --ImageReader.camera_params \"{args.colmap_camera_params}\" \
 --SiftExtraction.estimate_affine_shape=true \
 --SiftExtraction.domain_size_pooling=true \
---ImageReader.single_camera 1 \
+--ImageReader.single_camera {1 if args.colmap_single_camera else 0} \
 --database_path {db} \
 --image_path {images} \
 "
+
+    if args.use_gpu:
+        cmd += "--SiftExtraction.use_gpu 1 "
+    else:
+        cmd += "--SiftExtraction.use_gpu 0 "
+
     if os.path.exists(args.bkgd_mask):
         cmd = f'{cmd} --ImageReader.mask_path \"{args.bkgd_mask}\"'
     else:
@@ -117,26 +140,37 @@ def run_colmap(args):
 --database_path {db} \
 "
 
+    if args.use_gpu:
+        match_cmd += "--SiftMatching.use_gpu 1 "
+    else:
+        match_cmd += "--SiftMatching.use_gpu 0 "
+
     if args.vocab_path:
-        match_cmd += f" --VocabTreeMatching.vocab_tree_path {args.vocab_path}"
+        match_cmd += f"--VocabTreeMatching.vocab_tree_path {args.vocab_path} "
     run(match_cmd)
 
     # mapping (sparse reconstruction) -> camera poses
     os.makedirs(sparse, exist_ok=True)
     tolerance = {
         '--Mapper.ba_global_function_tolerance': 1e-6,
-        '--Mapper.ba_global_max_num_iterations': 20,
-        '--Mapper.ba_global_max_refinements': 3,
+        '--Mapper.ba_global_max_num_iterations': args.ba_global_max_num_iterations,
+        '--Mapper.ba_global_max_refinements': args.ba_global_max_refinements,
     }
     tolerance_string = ' '.join([f'{k} {v}' for k, v in tolerance.items()])
     log('running colmap mapper, this could take forever, go to sleep plz')
     log(yellow(f'using mapper tolerance parameters: {tolerance_string}'))
-    run(f"colmap mapper {tolerance_string} --database_path {db} --image_path {images} --output_path {sparse}")
+
+    # backend = 'glomap' if args.use_glomap else 'colmap'
+    # run(f"{backend} mapper {tolerance_string} --database_path {db} --image_path {images} --output_path {sparse}")
+    if args.use_glomap:
+        run(f"glomap mapper --database_path {db} --image_path {images} --output_path {sparse}")
+    else:
+        run(f"colmap mapper {tolerance_string} --database_path {db} --image_path {images} --output_path {sparse}")
 
     # global bundle adjustment for principal point
     tolerance = {
         '--BundleAdjustment.refine_principal_point': 1,
-        '--BundleAdjustment.max_num_iterations': 20,
+        '--BundleAdjustment.max_num_iterations': args.max_num_iterations,
         '--BundleAdjustment.function_tolerance': 1e-6,
         '--BundleAdjustment.gradient_tolerance': 1e-10,
         '--BundleAdjustment.parameter_tolerance': 1e-8,
@@ -145,7 +179,12 @@ def run_colmap(args):
     log('running colmap bundle_adjuster, this could take a smaller forever, grab a coffee plz')
     log(yellow(f'using bundle_adjuster tolerance parameters: {tolerance_string}'))
     run(f"colmap bundle_adjuster --input_path {sparse}/0 --output_path {sparse}/0 {tolerance_string}")
-    run(f"colmap model_orientation_aligner --image_path {images} --input_path {sparse}/0 --output_path {sparse}/0")
+
+    run(f"colmap model_orientation_aligner --image_path {images} --input_path {sparse}/0 --output_path {sparse}/0")  # TODO: Repeated undistortion here
+
+    os.makedirs(f'{dense}/0', exist_ok=True)
+    run(f"colmap image_undistorter --image_path {images} --input_path {sparse}/0 --output_path {dense}/0")
+
     os.makedirs(text, exist_ok=True)
     run(f"colmap model_converter --input_path {sparse}/0 --output_path {text} --output_type TXT")
     os.makedirs(ply, exist_ok=True)

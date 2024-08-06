@@ -1,6 +1,6 @@
 # 将单帧数据转换为Nerf格式
-from easymocap.mytools.camera_utils import read_cameras, Undistort, read_camera
-from easymocap.mytools.file_utils import save_json
+from easyvolcap.utils.camera_utils import read_cameras, Undistort, read_camera
+from easyvolcap.utils.file_utils import save_json
 from os.path import join
 import numpy as np
 import cv2

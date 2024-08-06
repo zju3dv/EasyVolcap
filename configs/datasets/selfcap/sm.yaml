@@ -1,0 +1,21 @@
+configs: configs/datasets/selfcap/selfcap.yaml # inherit from this config
+dataloader_cfg:
+    dataset_cfg: &dataset_cfg
+        data_root: data/selfcap/evc_sm
+        far: 10.0 # camera near far range, affects ray sampling and some cost volume based algorithms
+        bounds: [[-3, 0, -2.0], [3, 5, 2.0]] # axis-aligned bounding box of the scene, affects ray sampling and bounding box of some explicit algorithms
+        
+val_dataloader_cfg:
+    dataset_cfg:
+        <<: *dataset_cfg
+
+viewer_cfg:
+    # init_camera_index: 10
+    camera_cfg:
+        # prettier-ignore
+        R: [[0.9555678837, -0.2947269111, 0.0051056298], [0.0214541727, 0.0522634426, -0.9984028500], [0.2939893503, 0.9541512356, 0.0562643893]]
+        # prettier-ignore
+        T: [[0.3988920379, 0.1419302073, -1.3099641207]]
+        # prettier-ignore
+        # K: [[1106.9501479177, 0.0000000000, 1282.7288137255], [0.0000000000, 1106.9501479177, 927.6616777314], [0.0000000000, 0.0000000000, 1.0000000000]]
+

@@ -7,13 +7,14 @@ from torch.nn import functional as F
 
 from easyvolcap.utils.console_utils import *
 from easyvolcap.utils.sh_utils import eval_sh
+from easyvolcap.utils.timer_utils import timer
 from easyvolcap.utils.blend_utils import batch_rodrigues
-from easyvolcap.utils.data_utils import to_x, add_batch, load_pts
 from easyvolcap.utils.net_utils import make_buffer, make_params, typed
-from easyvolcap.utils.math_utils import torch_inverse_2x2, point_padding
+from easyvolcap.utils.data_utils import to_x, add_batch, load_pts, to_tensor
+from easyvolcap.utils.math_utils import torch_inverse_2x2, point_padding, affine_inverse, affine_padding
 
 
-def render_diff_gauss(xyz3: torch.Tensor, rgb3: torch.Tensor, cov: torch.Tensor, occ1: torch.Tensor, camera: dotdict):
+def render_diff_gauss(xyz3: torch.Tensor, rgb3: torch.Tensor, cov: torch.Tensor, occ1: torch.Tensor, camera: dotdict, tile_mask: torch.Tensor = None):
     from diff_gauss import GaussianRasterizationSettings, GaussianRasterizer
     # Prepare rasterization settings for gaussian
     raster_settings = GaussianRasterizationSettings(
@@ -43,7 +44,20 @@ def render_diff_gauss(xyz3: torch.Tensor, rgb3: torch.Tensor, cov: torch.Tensor,
         scales=None,
         rotations=None,
         cov3D_precomp=cov,
+        tile_mask=tile_mask,
     )
+
+    # if xyz3.requires_grad and tile_mask is not None:
+    #     from diff_gauss import interpret_geomBuffer, interpret_binningBuffer, interpret_imgBuffer
+    #     colors_precomp, means3D, scales, rotations, cov3Ds_precomp, tile_mask, radii, sh, geomBuffer, binningBuffer, imgBuffer, alpha = rendered_image.grad_fn.saved_tensors
+    #     raster_settings = rendered_image.grad_fn.raster_settings
+    #     num_rendered = rendered_image.grad_fn.num_rendered
+    #     BLOCK_X, BLOCK_Y = 16, 16
+    #     tile_height, tile_width = (raster_settings.image_height + BLOCK_Y - 1) // BLOCK_Y, (raster_settings.image_width + BLOCK_X - 1) // BLOCK_X
+    #     geom = interpret_geomBuffer(geomBuffer, len(means3D))
+    #     binning = interpret_binningBuffer(binningBuffer, num_rendered)
+    #     img = interpret_imgBuffer(imgBuffer, raster_settings.image_height * raster_settings.image_width, tile_height * tile_width)
+    #     breakpoint()
 
     rgb = rendered_image[None].permute(0, 2, 3, 1)
     acc = rendered_alpha[None].permute(0, 2, 3, 1)
@@ -52,6 +66,45 @@ def render_diff_gauss(xyz3: torch.Tensor, rgb3: torch.Tensor, cov: torch.Tensor,
     W = camera.image_width
     meta = dotdict({'radii': radii / float(max(H, W)), 'scr': scr, 'H': H, 'W': W})
     return rgb, acc, dpt, meta
+
+
+def render_fast_gauss(xyz3: torch.Tensor, rgb3: torch.Tensor, cov: torch.Tensor, occ1: torch.Tensor, camera: dotdict):
+    from fast_gauss import GaussianRasterizationSettings, GaussianRasterizer
+    # Prepare rasterization settings for gaussian
+    raster_settings = GaussianRasterizationSettings(
+        image_height=camera.image_height,
+        image_width=camera.image_width,
+        tanfovx=camera.tanfovx,
+        tanfovy=camera.tanfovy,
+        bg=torch.full([3], 0.0, device=xyz3.device),  # GPU
+        scale_modifier=1.0,
+        viewmatrix=camera.world_view_transform,
+        projmatrix=camera.full_proj_transform,
+        sh_degree=0,
+        campos=camera.camera_center,
+        prefiltered=True,
+        debug=False,
+    )
+
+    # Rasterize visible Gaussians to image, obtain their radii (on screen).
+    scr = torch.zeros_like(xyz3, requires_grad=True) + 0  # gradient magic
+    rasterizer = GaussianRasterizer(raster_settings=raster_settings)
+    rendered_image, _ = rasterizer(
+        means3D=xyz3,
+        means2D=scr,
+        shs=None,
+        colors_precomp=rgb3,
+        opacities=occ1,
+        scales=None,
+        rotations=None,
+        cov3D_precomp=cov,
+    )
+
+    if rendered_image is not None:
+        rgb = rendered_image[None].permute(0, 2, 3, 1)
+    else:
+        rgb = None
+    return rgb, None, None, None
 
 
 def render_fdgs(xyz3: torch.Tensor, rgb3: torch.Tensor, cov: torch.Tensor, occ1: torch.Tensor, camera: dotdict):
@@ -96,8 +149,8 @@ def render_fdgs(xyz3: torch.Tensor, rgb3: torch.Tensor, cov: torch.Tensor, occ1:
 
 
 @torch.jit.script
-def in_frustrum(xyz: torch.Tensor, full_proj_matrix: torch.Tensor, xy_padding: float = 0.5, padding: float = 0.01):
-    ndc = point_padding(xyz) @ full_proj_matrix # this is now in clip space
+def in_frustum(xyz: torch.Tensor, full_proj_matrix: torch.Tensor, xy_padding: float = 0.5, padding: float = 0.01):
+    ndc = point_padding(xyz) @ full_proj_matrix.to(xyz, non_blocking=True)  # this is now in clip space
     ndc = ndc[..., :3] / ndc[..., 3:]
     return (ndc[..., 2] > -1 - padding) & (ndc[..., 2] < 1 + padding) & (ndc[..., 0] > -1 - xy_padding) & (ndc[..., 0] < 1. + xy_padding) & (ndc[..., 1] > -1 - xy_padding) & (ndc[..., 1] < 1. + xy_padding)  # N,
 
@@ -218,6 +271,12 @@ def build_scaling_rotation(s: torch.Tensor, q: torch.Tensor):
     return L
 
 
+@torch.jit.script
+def build_cov6(s: torch.Tensor, q: torch.Tensor):
+    L = build_scaling_rotation(s, q)
+    return strip_lowerdiag(L @ L.mT)
+
+
 def fov2focal(fov, pixels):
     return pixels / (2 * np.tan(fov / 2))
 
@@ -237,6 +296,21 @@ def getWorld2View(R: torch.Tensor, t: torch.Tensor):
     for i in range(len(sh)):
         T = T.unsqueeze(0)
     T = T.expand(sh + (4, 4))
+    T[..., :3, :3] = R
+    T[..., :3, 3:] = t
+    return T
+
+
+def getWorld2ViewNumpy(R: np.ndarray, t: np.ndarray):
+    """
+    R: ..., 3, 3
+    T: ..., 3, 1
+    """
+    sh = R.shape[:-2]
+    T = np.eye(4, dtype=R.dtype)  # 4, 4
+    # for i in range(len(sh)):
+    #     T = T[None]
+    # T = np.broadcast_to(T, sh + (4, 4))
     T[..., :3, :3] = R
     T[..., :3, 3:] = t
     return T
@@ -268,6 +342,31 @@ def getProjectionMatrix(K: torch.Tensor, H: torch.Tensor, W: torch.Tensor, znear
     return P
 
 
+def getProjectionMatrixNumpy(K: np.ndarray, H: int, W: int, znear: float, zfar: float):
+    fx = K[0, 0]
+    fy = K[1, 1]
+    cx = K[0, 2]
+    cy = K[1, 2]
+    s = K[0, 1]
+    one = K[2, 2]
+
+    P: np.ndarray = np.zeros((4, 4), dtype=K.dtype)
+
+    P[0, 0] = 2 * fx / W
+    P[0, 1] = 2 * s / W
+    P[0, 2] = -1 + 2 * (cx / W)
+
+    P[1, 1] = 2 * fy / H
+    P[1, 2] = -1 + 2 * (cy / H)
+
+    P[2, 2] = -(zfar + znear) / (znear - zfar)
+    P[2, 3] = 2 * zfar * znear / (znear - zfar)
+
+    P[3, 2] = one
+
+    return P
+
+
 def prepare_gaussian_camera(batch):
     output = dotdict()
     H, W, K, R, T, n, f = batch.H[0], batch.W[0], batch.K[0], batch.R[0], batch.T[0], batch.n[0], batch.f[0]
@@ -280,11 +379,11 @@ def prepare_gaussian_camera(batch):
     output.R = R
     output.T = T
 
-    fl_x = batch.meta.K[0][0, 0]  # use cpu K
-    fl_y = batch.meta.K[0][1, 1]  # use cpu K
+    fl_x = cpu_K[0, 0]  # use cpu K
+    fl_y = cpu_K[1, 1]  # use cpu K
 
-    output.FoVx = focal2fov(fl_x, cpu_W)
-    output.FoVy = focal2fov(fl_y, cpu_H)
+    FoVx = focal2fov(fl_x, cpu_W)
+    FoVy = focal2fov(fl_y, cpu_H)
 
     output.world_view_transform = getWorld2View(R, T).transpose(0, 1)
     output.projection_matrix = getProjectionMatrix(K, H, W, n, f).transpose(0, 1)
@@ -292,8 +391,33 @@ def prepare_gaussian_camera(batch):
     output.camera_center = (-R.mT @ T)[..., 0]  # B, 3, 1 -> 3,
 
     # Set up rasterization configuration
-    output.tanfovx = math.tan(output.FoVx * 0.5)
-    output.tanfovy = math.tan(output.FoVy * 0.5)
+    output.tanfovx = math.tan(FoVx * 0.5)
+    output.tanfovy = math.tan(FoVy * 0.5)
+
+    return output
+
+
+def prepare_cpu_gaussian_camera(batch):
+    output = dotdict()
+    cpu_H, cpu_W, cpu_K, cpu_R, cpu_T, cpu_n, cpu_f = batch.meta.H[0], batch.meta.W[0], batch.meta.K[0], batch.meta.R[0], batch.meta.T[0], batch.meta.n[0], batch.meta.f[0]
+
+    output.image_height = cpu_H
+    output.image_width = cpu_W
+
+    fl_x = cpu_K[0, 0]  # use cpu K
+    fl_y = cpu_K[1, 1]  # use cpu K
+
+    FoVx = focal2fov(fl_x, cpu_W)
+    FoVy = focal2fov(fl_y, cpu_H)
+
+    output.world_view_transform = getWorld2View(cpu_R, cpu_T).transpose(0, 1)
+    output.projection_matrix = getProjectionMatrix(cpu_K, cpu_H, cpu_W, cpu_n, cpu_f).transpose(0, 1)
+    output.full_proj_transform = torch.matmul(output.world_view_transform, output.projection_matrix)
+    output.camera_center = (-cpu_R.mT @ cpu_T)[..., 0]  # B, 3, 1 -> 3,
+
+    # Set up rasterization configuration
+    output.tanfovx = math.tan(FoVx * 0.5)
+    output.tanfovy = math.tan(FoVy * 0.5)
 
     return output
 
@@ -315,18 +439,19 @@ def convert_to_gaussian_camera(K: torch.Tensor,
                                ):
     output = dotdict()
 
-    output.image_height = cpu_H
-    output.image_width = cpu_W
-
     output.K = K
     output.R = R
     output.T = T
+    output.H = H.item()
+    output.W = W.item()
+    output.n = n.item()
+    output.f = f.item()
 
-    output.znear = cpu_n
-    output.zfar = cpu_f
+    output.image_height = cpu_H.item()
+    output.image_width = cpu_W.item()
 
-    output.FoVx = focal2fov(cpu_K[0, 0].cpu(), cpu_W.cpu())  # MARK: MIGHT SYNC IN DIST TRAINING, WHY?
-    output.FoVy = focal2fov(cpu_K[1, 1].cpu(), cpu_H.cpu())  # MARK: MIGHT SYNC IN DIST TRAINING, WHY?
+    FoVx = focal2fov(cpu_K[0, 0].item(), cpu_W.item())  # MARK: MIGHT SYNC IN DIST TRAINING, WHY?
+    FoVy = focal2fov(cpu_K[1, 1].item(), cpu_H.item())  # MARK: MIGHT SYNC IN DIST TRAINING, WHY?
 
     # Use .float() to avoid AMP issues
     output.world_view_transform = getWorld2View(R, T).transpose(0, 1).float()  # this is now to be right multiplied
@@ -335,10 +460,149 @@ def convert_to_gaussian_camera(K: torch.Tensor,
     output.camera_center = (-R.mT @ T)[..., 0].float()  # B, 3, 1 -> 3,
 
     # Set up rasterization configuration
+    output.tanfovx = np.tan(FoVx * 0.5)
+    output.tanfovy = np.tan(FoVy * 0.5)
+
+    return output
+
+
+def convert_to_cpu_gaussian_camera(K: torch.Tensor,
+                                   R: torch.Tensor,
+                                   T: torch.Tensor,
+                                   H: torch.Tensor,
+                                   W: torch.Tensor,
+                                   n: torch.Tensor,
+                                   f: torch.Tensor,
+                                   cpu_K: torch.Tensor,
+                                   cpu_R: torch.Tensor,
+                                   cpu_T: torch.Tensor,
+                                   cpu_H: int,
+                                   cpu_W: int,
+                                   cpu_n: float = 0.01,
+                                   cpu_f: float = 100.,
+                                   ):
+    output = dotdict()
+
+    output.K = cpu_K.numpy()
+    output.R = cpu_R.numpy()
+    output.T = cpu_T.numpy()
+    output.H = cpu_H
+    output.W = cpu_W
+    output.n = cpu_n
+    output.f = cpu_f
+
+    output.image_height = cpu_H
+    output.image_width = cpu_W
+
+    FoVx = focal2fov(cpu_K[0, 0].item(), cpu_W)  # MARK: MIGHT SYNC IN DIST TRAINING, WHY?
+    FoVy = focal2fov(cpu_K[1, 1].item(), cpu_H)  # MARK: MIGHT SYNC IN DIST TRAINING, WHY?
+
+    # Use .float() to avoid AMP issues
+    output.world_view_transform = getWorld2ViewNumpy(output.R, output.T).T.astype(np.float32)  # this is now to be right multiplied
+    output.projection_matrix = getProjectionMatrixNumpy(output.K, output.H, output.W, output.n, output.f).T.astype(np.float32)  # this is now to be right multiplied
+    output.full_proj_transform = (output.world_view_transform @ output.projection_matrix).astype(np.float32)   # 4, 4
+    output.camera_center = (-output.R.T @ output.T)[..., 0].astype(np.float32)  # B, 3, 1 -> 3,
+
+    # Set up rasterization configuration
+    output.tanfovx = np.tan(FoVx * 0.5)
+    output.tanfovy = np.tan(FoVy * 0.5)
+
+    # output = to_tensor(output)
+    return output
+
+
+def convert_to_gl_camera(K: torch.Tensor,
+                         R: torch.Tensor,
+                         T: torch.Tensor,
+                         H: torch.Tensor,
+                         W: torch.Tensor,
+                         n: torch.Tensor,
+                         f: torch.Tensor,
+                         cpu_K: torch.Tensor,
+                         cpu_R: torch.Tensor,
+                         cpu_T: torch.Tensor,
+                         cpu_H: int,
+                         cpu_W: int,
+                         cpu_n: float = 0.01,
+                         cpu_f: float = 100.,
+                         ):
+    output = dotdict()
+
+    output.image_height = cpu_H.item()
+    output.image_width = cpu_W.item()
+
+    output.K = K
+    output.R = R
+    output.T = T
+
+    output.znear = cpu_n.item()
+    output.zfar = cpu_f.item()
+
+    output.FoVx = focal2fov(cpu_K[0, 0].item(), cpu_W.item())  # MARK: MIGHT SYNC IN DIST TRAINING, WHY?
+    output.FoVy = focal2fov(cpu_K[1, 1].item(), cpu_H.item())  # MARK: MIGHT SYNC IN DIST TRAINING, WHY?
+
+    # Use .float() to avoid AMP issues
+    output.world_view_transform = getWorld2View(R, T).transpose(0, 1).float()  # this is now to be right multiplied
+    c2w = affine_inverse(output.world_view_transform.mT).mT
+    c2w[1] *= -1
+    c2w[2] *= -1
+    output.world_view_transform = affine_inverse(c2w.mT).mT
+    output.projection_matrix = getProjectionMatrix(K, H, W, n, f).transpose(0, 1).float()  # this is now to be right multiplied
+    output.projection_matrix[2][0] *= -1
+    output.projection_matrix[2][2] *= -1
+    output.projection_matrix[2][3] *= -1
+    output.full_proj_transform = torch.matmul(output.world_view_transform, output.projection_matrix).float()   # 4, 4
+    output.camera_center = (-R.mT @ T)[..., 0].float()  # B, 3, 1 -> 3,
+
+    # Set up rasterization configuration
     output.tanfovx = np.tan(output.FoVx * 0.5)
     output.tanfovy = np.tan(output.FoVy * 0.5)
 
     return output
+
+
+def batch_to_camera(batch: dotdict, i: int = 0, is_cpu: bool = False, is_gl: bool = False, scene_scale: float = 1.0, no_batch: bool = False):
+    if not is_cpu:
+        if no_batch:
+            K = batch.K
+            R = batch.R
+            T = batch.T / scene_scale
+            H = batch.H.item()
+            W = batch.W.item()
+            n = batch.n.item() / scene_scale
+            f = batch.f.item() / scene_scale
+        else:
+            K = batch.K[i]
+            R = batch.R[i]
+            T = batch.T[i] / scene_scale
+            H = batch.H[i]
+            W = batch.W[i]
+            n = batch.n[i] / scene_scale
+            f = batch.f[i] / scene_scale
+    if no_batch:
+        cpu_K = batch.meta.K
+        cpu_R = batch.meta.R
+        cpu_T = batch.meta.T / scene_scale
+        cpu_H = batch.meta.H.item()
+        cpu_W = batch.meta.W.item()
+        cpu_n = batch.meta.n.item() / scene_scale
+        cpu_f = batch.meta.f.item() / scene_scale
+    else:
+        cpu_K = batch.meta.K[i]
+        cpu_R = batch.meta.R[i]
+        cpu_T = batch.meta.T[i] / scene_scale
+        cpu_H = batch.meta.H[i]
+        cpu_W = batch.meta.W[i]
+        cpu_n = batch.meta.n[i] / scene_scale
+        cpu_f = batch.meta.f[i] / scene_scale
+
+    if is_cpu:
+        if is_gl:
+            return convert_to_gl_camera(K, R, T, H, W, n, f, cpu_K, cpu_R, cpu_T, cpu_H, cpu_W, cpu_n, cpu_f)
+        else:
+            return convert_to_cpu_gaussian_camera(None, None, None, None, None, None, None, cpu_K, cpu_R, cpu_T, cpu_H, cpu_W, cpu_n, cpu_f)
+    else:
+        return convert_to_gaussian_camera(K, R, T, H, W, n, f, cpu_K, cpu_R, cpu_T, cpu_H, cpu_W, cpu_n, cpu_f)
 
 
 class GaussianModel(nn.Module):
@@ -435,7 +699,7 @@ class GaussianModel(nn.Module):
     def create_from_pcd(self, xyz: torch.Tensor, colors: torch.Tensor = None, opacities: float = 0.1, scales: torch.Tensor = None):
         from simple_knn._C import distCUDA2
         if xyz is None:
-            xyz = torch.empty(0, 3, device='cuda')  # by default, init empty gaussian model on CUDA
+            xyz = torch.empty(1, 3, device='cuda')  # by default, init empty gaussian model on CUDA
 
         features = torch.zeros((xyz.shape[0], 3, (self.max_sh_degree + 1) ** 2))
         if colors is not None:
@@ -802,10 +1066,10 @@ class GaussianModel(nn.Module):
         sh = self.get_features
 
         # Prepare the camera transformation for Gaussian
-        gaussian_camera = to_x(prepare_gaussian_camera(batch), torch.float)
+        gaussian_camera = prepare_gaussian_camera(batch)
 
-        # is_in_frustrum = in_frustrum(xyz, gaussian_camera.full_proj_transform)
-        # print('Number of points to render:', is_in_frustrum.sum().item())
+        # is_in_frustum = in_frustum(xyz, gaussian_camera.full_proj_transform)
+        # print('Number of points to render:', is_in_frustum.sum().item())
 
         # Prepare rasterization settings for gaussian
         raster_settings = GaussianRasterizationSettings(
@@ -844,6 +1108,80 @@ class GaussianModel(nn.Module):
         dpt = rendered_depth.permute(1, 2, 0)
 
         return rgb, acc, dpt  # H, W, C
+
+    def render_fast(self, batch: dotdict, scale_mult: float = 1.0, alpha_mult: float = 1.0):
+        # TODO: Make rendering function easier to read, now there're at least 3 types of gaussian rendering function
+        from fast_gauss import GaussianRasterizationSettings, GaussianRasterizer
+        timer.record('intro')
+
+        # Prepare renderable parameters, without batch
+        xyz = self._xyz
+
+        if not hasattr(self, '_cov'):
+            scale3 = self.get_scaling
+            rot4 = self.get_rotation
+            self._cov = build_cov6(scale3, rot4)
+
+        if not hasattr(self, '_occ'):
+            self._occ = self.get_opacity  # this sigmoid take quite some time
+
+        if not hasattr(self, '_sh'):
+            self._sh = self.get_features
+
+        occ = self._occ
+        cov = self._cov
+        sh = self._sh
+        timer.record('get')
+
+        # Prepare the camera transformation for Gaussian
+        gaussian_camera = prepare_cpu_gaussian_camera(batch)
+        timer.record('camera')
+
+        # is_in_frustum = in_frustum(xyz, gaussian_camera.full_proj_transform)
+        # print('Number of points to render:', is_in_frustum.sum().item())
+
+        # Prepare rasterization settings for gaussian
+        raster_settings = GaussianRasterizationSettings(
+            image_height=gaussian_camera.image_height,
+            image_width=gaussian_camera.image_width,
+            tanfovx=gaussian_camera.tanfovx,
+            tanfovy=gaussian_camera.tanfovy,
+            bg=torch.full([3], 0.0, device=xyz.device),  # GPU # TODO: make these configurable
+            scale_modifier=1.0,  # TODO: make these configurable
+            viewmatrix=gaussian_camera.world_view_transform,
+            projmatrix=gaussian_camera.full_proj_transform,
+            sh_degree=self.active_sh_degree,
+            campos=gaussian_camera.camera_center,
+            prefiltered=False,
+            debug=False,
+        )
+        timer.record('setting')
+
+        # Rasterize visible Gaussians to image, obtain their radii (on screen).
+        rasterizer = GaussianRasterizer(raster_settings=raster_settings)
+        timer.record('init')
+
+        rendered_image, rendered_alpha = rasterizer(
+            means3D=xyz,
+            means2D=None,
+            shs=sh,
+            colors_precomp=None,
+            opacities=occ * alpha_mult,
+            scales=None,
+            rotations=None,
+            cov3D_precomp=cov,
+        )
+        timer.record('calling')
+
+        if rendered_image is not None:
+            # No batch dimension
+            rgb = rendered_image.permute(1, 2, 0)
+            acc = rendered_alpha.permute(1, 2, 0)
+            dpt = rendered_alpha.permute(1, 2, 0)
+
+            return rgb, acc, dpt  # H, W, C
+        else:
+            return None, None, None
 
 
 def render(viewpoint_camera, pc: GaussianModel, pipe, bg_color: torch.Tensor, scaling_modifier=1.0, override_color=None):

@@ -62,15 +62,15 @@ def preflight(
     benchmark: Union[bool, str] = True,  # for static sized input
     ignore_breakpoint: bool = False,
     hide_progress: bool = False,
-    less_verbose: bool = False,
     hide_output: bool = False,
+    verbose: bool = False,
     **kwargs,
 ):
     # Some early on GUI specific configurations
     if ignore_breakpoint: disable_breakpoint()
     if hide_progress: disable_progress()
     if hide_output: disable_console()
-    if less_verbose: disable_verbose_log()
+    if verbose: enable_verbose_log()
     if benchmark == 'train': benchmark = args.type == 'train'  # for static sized input
 
     # Maybe make this run deterministic?
@@ -164,8 +164,21 @@ def test(
     # Construct other parts of the training process
     val_dataloader: "VolumetricVideoDataloader" = DATALOADERS.build(val_dataloader_cfg)  # reuse the validataion
 
+    # Handle model placement
+    rank = get_rank()
+    device = torch.device(f'{base_device}:{rank}')
+    if base_device == 'cuda':
+        torch.cuda.set_device(device)
+
     model: "VolumetricVideoModel" = MODELS.build(model_cfg)
     model = model.to(base_device, non_blocking=True)
+    model.eval()  # set to evaluation mode
+    if base_device == 'cpu':
+        with torch.no_grad():
+            for param in model.parameters():
+                param.set_(param.contiguous())  # pin memory for cpu
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
 
     runner: "VolumetricVideoRunner" = RUNNERS.build(runner_cfg,
                                                     model=model,
@@ -174,6 +187,7 @@ def test(
                                                     record_images_to_tb=record_images_to_tb,  # another default
                                                     print_test_progress=print_test_progress,  # another default
                                                     val_dataloader=val_dataloader)
+    if hasattr(model, 'move_device'): model.move_device(device)
 
     if dry_run: return runner  # just construct everything, then return
 
@@ -209,6 +223,7 @@ def train(
     # Printing configuration
     dry_run: bool = False,  # only print network and exit
     print_model: bool = False,  # since the network is pretty complex, give the option to print
+    print_parameters: bool = True,
 
     # Reproducibility configuration
     base_device: str = 'cuda',
@@ -229,11 +244,26 @@ def train(
     # Handle model placement
     rank = get_rank()
     device = torch.device(f'{base_device}:{rank}')
-    torch.cuda.set_device(device)
+    if base_device == 'cuda':
+        torch.cuda.set_device(device)
 
     # Model building and distributed training related stuff
     model: "VolumetricVideoModel" = MODELS.build(model_cfg)  # some components are directly moved to cuda when building
     model.to(device, non_blocking=True)  # move this model to this specific device
+    model.train()  # set to training mode, this is the default mode
+
+    if device.type == 'cpu':
+        # with torch.no_grad():
+        for name, param in model.named_parameters():
+            # param.data = param.data.pin_memory()  # pin memory for cpu
+            param.data = param.data.to('cuda', non_blocking=True).to('cpu', non_blocking=True)  # HACK: pin memory for cpu
+        # from easyvolcap.utils.host_utils import host_empty_cache
+        # torch.cuda.empty_cache()
+        # host_empty_cache()
+        # torch.cuda.reset_peak_memory_stats()
+
+    # else:
+        # model.to(device, non_blocking=True)  # move this model to this specific device
 
     # Handle distributed model
     if get_distributed():
@@ -249,26 +279,32 @@ def train(
                                                     model=model,
                                                     dataloader=dataloader,
                                                     val_dataloader=val_dataloader if not get_rank() else None)
+    if hasattr(model, 'move_device'): model.move_device(device)
 
     if print_model and not get_rank():  # only print once
         # For some methods, both the network and the sampler or even the renderer contains optimizable parameters
         # But the sampler and render both has a reference to the network, which gets printed (not saved, tested)
         pprint(model)  # with indent guides
-    try:
-        nop = number_of_params(model)
-        log(f'Number of optimizable parameters: {nop} ({nop / 1e6:.2f} M)')
-    except ValueError as e:
-        # Ignore: Attempted to use an uninitialized parameter in <method 'numel' of 'torch._C._TensorBase' objects>
-        pass
+    if print_parameters:
+        try:
+            nop = number_of_params(model)
+            if nop > 1e9:
+                log(f'Number of optimizable parameters: {nop} ({nop / 1e9:.2f} B)')
+            else:
+                log(f'Number of optimizable parameters: {nop} ({nop / 1e6:.2f} M)')
+        except ValueError as e:
+            # Ignore: Attempted to use an uninitialized parameter in <method 'numel' of 'torch._C._TensorBase' objects>
+            pass
 
     if dry_run: return runner  # just construct everything, then return
 
     # The actual calling, with grace full exit
     launcher(**kwargs, runner_function=runner.train, runner_object=runner)
 
+
 @catch_throw
 def main():
-    if cfg.mocking: log(f'Modules imported. Mode: {yellow(args.type)}. No config loaded, pass config file using `-c <PATH_TO_CONFIG>`')  # MARK: GLOBAL
+    if cfg.mocking: log(f'{green("Modules imported.")} Mode: {yellow(args.type)}. No config loaded, pass config file using `-c <PATH_TO_CONFIG>`')  # MARK: GLOBAL
     else: globals()[args.type](cfg)  # invoke this (call callable_from_cfg -> call_from_cfg)
 
 

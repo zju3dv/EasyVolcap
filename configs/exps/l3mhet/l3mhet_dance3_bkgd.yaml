@@ -11,9 +11,6 @@ dataloader_cfg: &dataloader_cfg
         images_dir: bkgd/images
 
 val_dataloader_cfg:
-    dataset_cfg:
-        <<: *dataset_cfg
-val_dataloader_cfg:
     <<: *dataloader_cfg
     dataset_cfg:
         <<: *dataset_cfg

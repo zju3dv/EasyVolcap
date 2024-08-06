@@ -1,0 +1,19 @@
+configs: configs/datasets/selfcap/selfcap.yaml # inherit from this config
+
+dataloader_cfg:
+    dataset_cfg: &dataset_cfg
+        data_root: data/selfcap/0319-10
+        bounds: [[-2.5, 1.37, -1.5], [2.1, 5.0, 1.18]] # axis-aligned bounding box of the scene, affects ray sampling and bounding box of some explicit algorithms
+
+val_dataloader_cfg:
+    dataset_cfg:
+        <<: *dataset_cfg
+
+viewer_cfg:
+    camera_cfg:
+        # prettier-ignore
+        K: [[1316.0,0.0,683.0],[0.0,1316.0,384.0],[0.0,0.0,1.0]]
+        # prettier-ignore
+        R: [[0.9975396394729614,-0.07010440528392792,0.0],[-0.005692917387932539,-0.0810064747929573,-0.9967105388641357],[0.06987380236387253,0.9942582845687866,-0.08120626956224442]]
+        # prettier-ignore
+        T: [[-0.3713109493255615],[0.19276264309883118],[-1.122495174407959]]

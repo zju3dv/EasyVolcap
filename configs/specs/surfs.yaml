@@ -2,7 +2,7 @@ configs: configs/specs/vhulls.yaml
 dataloader_cfg:
     dataset_cfg: &dataset_cfg
         use_vhulls: False
-        skip_loading_images: True
+        disk_dataset: True
 
 val_dataloader_cfg:
     dataset_cfg:

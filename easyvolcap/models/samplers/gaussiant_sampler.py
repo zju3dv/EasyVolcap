@@ -27,7 +27,7 @@ from easyvolcap.utils.console_utils import *
 from easyvolcap.utils.console_utils import dotdict
 from easyvolcap.utils.bound_utils import get_bounds
 from easyvolcap.utils.chunk_utils import multi_gather, multi_scatter
-from easyvolcap.utils.gaussian_utils import GaussianModel, in_frustrum
+from easyvolcap.utils.gaussian_utils import GaussianModel, in_frustum
 from easyvolcap.utils.net_utils import normalize, typed, update_optimizer_state
 from easyvolcap.utils.data_utils import load_pts, export_pts, to_x, to_cuda, to_cpu, to_tensor, remove_batch
 
@@ -113,7 +113,8 @@ class GaussianTSampler(PointPlanesSampler):
         self.post_handle = self.register_load_state_dict_post_hook(self._load_state_dict_post_hook)
 
         if preload_gs:
-            self.load_from_file(preload_gs)
+            assert len(self.pcds) == 1, 'For now, preloading 3dgs is only supported for static scene reconstruction'
+            self.pcds[0].load_ply(preload_gs)
 
     def render_imgui(self, viewer: 'VolumetricVideoViewer', batch: dotdict):
         from imgui_bundle import imgui
@@ -122,6 +123,51 @@ class GaussianTSampler(PointPlanesSampler):
 
         for i, pcd in enumerate(self.pcds):
             imgui.text(f'Number of points: {len(pcd._xyz)}')
+
+    def render_fast(self, xyz: torch.Tensor, sh: torch.Tensor, scale3: torch.Tensor, rot4: torch.Tensor, occ1: torch.Tensor, batch: dotdict):
+        from easyvolcap.utils.gaussian_utils import prepare_gaussian_camera
+        camera = prepare_gaussian_camera(batch)
+
+        # Remove batch dimension
+        xyz, sh, scale3, rot4, occ1 = remove_batch([xyz, sh, scale3, rot4, occ1])
+
+        from fast_gauss import GaussianRasterizationSettings, GaussianRasterizer
+        # Prepare rasterization settings for gaussian
+        raster_settings = GaussianRasterizationSettings(
+            image_height=camera.image_height,
+            image_width=camera.image_width,
+            tanfovx=camera.tanfovx,
+            tanfovy=camera.tanfovy,
+            bg=torch.full([3], self.bg_brightness if hasattr(self, 'bg_brightness') else 0.0, device=xyz.device),  # GPU
+            scale_modifier=1.0,
+            viewmatrix=camera.world_view_transform,
+            projmatrix=camera.full_proj_transform,
+            sh_degree=0,
+            campos=camera.camera_center,
+            prefiltered=False,
+            debug=False
+        )
+
+        # Rasterize visible Gaussians to image, obtain their radii (on screen).
+        rasterizer = GaussianRasterizer(raster_settings=raster_settings)
+        image, alpha = rasterizer(
+            means3D=xyz,
+            means2D=None,
+            shs=sh.mT,
+            colors_precomp=None,
+            opacities=occ1,
+            scales=scale3,
+            rotations=rot4,
+            cov3D_precomp=None,
+        )
+
+        if image is not None:
+            rgb = image[None].permute(0, 2, 3, 1)
+            acc = alpha[None].permute(0, 2, 3, 1)
+            dpt = torch.zeros_like(rgb[..., :1])
+            return rgb, acc, dpt
+        else:
+            return None, None, None
 
     def render_gaussians(self, xyz: torch.Tensor, sh: torch.Tensor, scale3: torch.Tensor, rot4: torch.Tensor, occ1: torch.Tensor, batch: dotdict):
         # Lazy imports
@@ -134,8 +180,8 @@ class GaussianTSampler(PointPlanesSampler):
         # Prepare the camera transformation for Gaussian
         gaussian_camera = to_x(prepare_gaussian_camera(batch), torch.float)
 
-        # is_in_frustrum = in_frustrum(xyz, gaussian_camera.full_proj_transform)
-        # print('Number of points to render:', is_in_frustrum.sum().item())
+        # is_in_frustum = in_frustum(xyz, gaussian_camera.full_proj_transform)
+        # print('Number of points to render:', is_in_frustum.sum().item())
 
         # Prepare rasterization settings for gaussian
         raster_settings = GaussianRasterizationSettings(
@@ -390,8 +436,10 @@ class GaussianTSampler(PointPlanesSampler):
 
         # Perform points rendering
         rgb, acc, dpt = self.render_gaussians(xyz, sh, scale3 * self.scale_mult, rot4, alpha * self.alpha_mult, batch)  # B, HW, C
+        # rgb, acc, dpt = (self.render_gaussians if args.type == 'train' else self.render_fast)(xyz, sh, scale3 * self.scale_mult, rot4, alpha * self.alpha_mult, batch)  # B, HW, C
 
         # Prepare output
-        batch.output.pcd = [self.pcds[l] for l in index]
-        self.store_output(None, xyz, rgb, acc, dpt, batch)
-        self.last_output = batch.output  # retain gradients after updates
+        if rgb is not None:
+            batch.output.pcd = [self.pcds[l] for l in index]
+            self.store_output(None, xyz, rgb, acc, dpt, batch)
+            self.last_output = batch.output  # retain gradients after updates

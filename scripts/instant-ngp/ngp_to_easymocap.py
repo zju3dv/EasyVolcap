@@ -4,7 +4,7 @@ import numpy as np
 from os.path import join
 
 import argparse
-from easymocap.mytools.camera_utils import read_camera, write_camera
+from easyvolcap.utils.camera_utils import read_camera, write_camera
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-i', '--input_file', default='data/zju_mocap/my_377/colmap/opt_cam.msgpack')

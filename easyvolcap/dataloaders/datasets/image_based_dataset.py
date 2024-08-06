@@ -43,7 +43,7 @@ class ImageBasedDataset(VolumetricVideoDataset):
                  source_type: str = Sourcing.DISTANCE.name,  # Sourcing.DISTANCE or Sourcing.ZIGZAG
                  supply_decoded: bool = False,
                  barebone: bool = False,
-                 skip_loading_images: bool = False,
+                 disk_dataset: bool = False,
 
                  src_view_sample: List[int] = [0, None, 1],  # use these as input source views
                  force_sparse_view: bool = True,  # The user will be responsible for setting up the correct view count
@@ -53,7 +53,7 @@ class ImageBasedDataset(VolumetricVideoDataset):
         # Ignore things, since this will serve as a base class of classes supporting *args and **kwargs
         # The inspection of registration and config system only goes down one layer
         # Otherwise it would be to inefficient
-        call_from_cfg(super().__init__, kwargs, skip_loading_images=skip_loading_images)
+        call_from_cfg(super().__init__, kwargs, disk_dataset=disk_dataset)
 
         self.closest_using_t = closest_using_t
         self.src_view_sample = src_view_sample
@@ -188,8 +188,8 @@ class ImageBasedDataset(VolumetricVideoDataset):
             if nm_bytes[0] is not None: output.meta.src_norms = nm_bytes
         return output
 
-    def get_viewer_batch(self, output: dotdict):
-        if self.barebone: return VolumetricVideoDataset.get_viewer_batch(self, output)
+    def get_viewer_batch(self, output: dotdict, requires_bounds: bool = True):
+        if self.barebone: return VolumetricVideoDataset.get_viewer_batch(self, output, requires_bounds)
 
         # The batch contains H, W, K, R, T, t (time index)
         H, W, K, R, T = output.H, output.W, output.K, output.R, output.T

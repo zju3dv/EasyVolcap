@@ -204,7 +204,7 @@ class Config:
 
     @staticmethod
     def _file2dict(filename, use_predefined_variables=True, extra_base_cfg_dict={}):
-        filename = osp.abspath(osp.expanduser(filename))
+        # filename = osp.abspath(osp.expanduser(filename))
         check_file_exist(filename)
         fileExtname = osp.splitext(filename)[1]
         if fileExtname not in ['.py', '.json', '.yaml', '.yml']:
@@ -267,6 +267,8 @@ class Config:
         # Substitute base variables from strings to their actual values
         if BASE_KEY in cfg_dict:
             cfg_dir = osp.dirname(filename)
+            ist_dir = f'{osp.dirname(__file__)}/..'
+            evc_dir = f'{osp.dirname(__file__)}/../..'
             base_filename = cfg_dict.pop(BASE_KEY)
             base_filename = base_filename if isinstance(base_filename, list) else [base_filename]
             base_cfg_dict = {}
@@ -275,6 +277,10 @@ class Config:
                 # NOTE: easyvolcap: use project-wise relative path for configuration?
                 if os.path.exists(osp.join(cfg_dir, f)):
                     f = osp.join(cfg_dir, f)
+                if os.path.exists(osp.join(ist_dir, f)):
+                    f = osp.join(ist_dir, f)
+                if os.path.exists(osp.join(evc_dir, f)):
+                    f = osp.join(evc_dir, f)
 
                 # Load base config file with already loaded config
                 _cfg_dict, _cfg_text = Config._file2dict(f, extra_base_cfg_dict=Config._merge_a_into_b(base_cfg_dict, deepcopy(extra_base_cfg_dict)))

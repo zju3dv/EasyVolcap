@@ -12,6 +12,32 @@ VT = TypeVar("VT")  # value type
 # If removed, all will still work flawlessly, just no editor annotation for output, type and meta
 
 
+def type_to_torch_dtype(type):
+    import torch
+    import numpy as np
+
+    if not hasattr(type_to_torch_dtype, 'dtype_map'):
+        type_to_torch_dtype.dtype_map = {
+            int: torch.int64,
+            float: torch.float32,
+            bool: torch.bool,
+            complex: torch.complex64,
+            np.dtype('float32'): torch.float32,
+            np.dtype('float64'): torch.float64,
+            np.dtype('int32'): torch.int32,
+            np.dtype('int64'): torch.int64,
+            np.dtype('uint8'): torch.uint8,
+            np.dtype('bool'): torch.bool,
+            np.float32: torch.float32,
+            np.float64: torch.float64,
+            np.int32: torch.int32,
+            np.int64: torch.int64,
+            np.uint8: torch.uint8,
+            # np.bool: torch.bool,
+        }
+    return type_to_torch_dtype.dtype_map[type]
+
+
 def return_dotdict(func: Callable):
     def inner(*args, **kwargs):
         return dotdict(func(*args, **kwargs))
@@ -60,7 +86,15 @@ class dotdict(dict, Dict[KT, VT]):
                     if target_type == bool and isinstance(v, str):
                         dct[k] = v == 'True'
                     else:
-                        dct[k] = target_type(v)
+                        # Lazy imports
+                        import torch
+                        import numpy as np
+                        if isinstance(v, torch.Tensor) and not issubclass(target_type, torch.Tensor):
+                            dct[k] = v.type(type_to_torch_dtype(target_type))
+                        elif isinstance(v, np.ndarray) and not issubclass(target_type, np.ndarray):
+                            dct[k] = v.astype(target_type)
+                        else:
+                            dct[k] = target_type(v)
 
                 if isinstance(v, dict):
                     self[k].update(v)  # recursion from here

@@ -6,8 +6,8 @@ from easyvolcap.utils.console_utils import *
 @catch_throw
 def main():
     args = dotdict()
-    args.metrics_json = '/mnt/data/home/xuzhen/projects/large_gaussian/demo/levels/3dgs/metrics.json'
-    args.time_json = '/mnt/data/home/xuzhen/projects/large_gaussian/demo/levels/3dgs/time.json'
+    args.metrics_json = '/mnt/remote/D002/home/xuzhen/projects/large_gaussian/demo/levels/3dgs/metrics.json'
+    args.time_json = '/mnt/remote/D002/home/xuzhen/projects/large_gaussian/demo/levels/3dgs/time.json'
     args.main_axis = 'camera'
     args = dotdict(vars(build_parser(args).parse_args()))
 

@@ -18,10 +18,10 @@ def main():
     import sys
     sys.path.append('.')
 
-    sep_ind = sys.argv.index('--') if '--' in sys.argv else 0
+    sep_ind = sys.argv.index('--') if '--' in sys.argv else len(sys.argv)
     our_args = sys.argv[1:sep_ind]
-    evv_args = sys.argv[sep_ind + 1:]
-    sys.argv = [sys.argv[0]] + ['-t','test'] + evv_args + ['val_dataloader_cfg.dataset_cfg.skip_loading_images=True', 'val_dataloader_cfg.sampler_cfg.view_sample=0,None,1', 'val_dataloader_cfg.dataset_cfg.view_sample=0,None,1', 'val_dataloader_cfg.dataset_cfg.frame_sample=0,1,1']  # disable log and use custom logging mechanism
+    evc_args = sys.argv[sep_ind + 1:]
+    sys.argv = [sys.argv[0]] + ['-t','test'] + evc_args + ['val_dataloader_cfg.dataset_cfg.disk_dataset=True', 'val_dataloader_cfg.sampler_cfg.view_sample=0,None,1', 'val_dataloader_cfg.dataset_cfg.view_sample=0,None,1', 'val_dataloader_cfg.dataset_cfg.frame_sample=0,1,1']  # disable log and use custom logging mechanism
     log = partial(console_utils.log, file=sys.stdout)  # monkey patch the actual output used in this script
     print = partial(console_utils.print, file=sys.stdout)  # monkey patch the actual output used in this script
 

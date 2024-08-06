@@ -51,9 +51,8 @@ class NoopLR(_LRScheduler):
     def __init__(self, optimizer, last_epoch=-1, **kwargs):
         super().__init__(optimizer, last_epoch)
 
-    def get_lr(self):
-        lrs = [base_lr for base_lr in self.base_lrs]
-        return lrs
+    def step(self, epoch=None):
+        pass
 
 
 @SCHEDULERS.register_module()
@@ -71,7 +70,7 @@ class ExponentialLR(_LRScheduler):
 
     def get_lr(self):
         lrs = [base_lr * self.gamma ** (self.last_epoch / self.decay_iter) for base_lr in self.base_lrs]
-        lrs = [max(lr, self.min_lr) for lr in lrs]
+        lrs = [max(lr, self.min_lr) if base_lr > self.min_lr else lr for base_lr, lr in zip(self.base_lrs, lrs)]
         return lrs
 
 

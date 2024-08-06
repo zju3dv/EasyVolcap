@@ -7,7 +7,7 @@ model_cfg:
 
 val_dataloader_cfg:
     dataset_cfg:
-        skip_loading_images: True
+        disk_dataset: True
         # prettier-ignore
         view_sample: {{configs.dataloader_cfg.dataset_cfg.view_sample}}  # use all images
         # prettier-ignore

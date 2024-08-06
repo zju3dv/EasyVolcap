@@ -6,21 +6,9 @@ from functools import partial
 from termcolor import colored
 
 from easyvolcap.utils.console_utils import *
-from easyvolcap.utils.test_utils import my_tests
+from easyvolcap.utils.test_utils import my_tests, assert_func, assert_true
 from easyvolcap.utils.loss_utils import lossfun_outer, inner_outer, lossfun_distortion, interval_distortion
 from easyvolcap.utils.prop_utils import importance_sampling, weighted_percentile, searchsorted, max_dilate_weights, max_dilate, query, anneal_weights
-
-
-@catch_throw
-def assert_true(expr):
-    if isinstance(expr, torch.Tensor):
-        expr = expr.all()
-    assert expr, f'{repr(expr)} is not true'
-
-
-@catch_throw
-def assert_func(func, *args, **kwargs):
-    return func(*args, **kwargs)
 
 
 def inner(t0, t1, w1):

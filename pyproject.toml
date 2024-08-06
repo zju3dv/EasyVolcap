@@ -9,7 +9,7 @@ description = "EasyVolcap: Accelerating Neural Volumetric Video Research"
 readme = "readme.md"
 license = { file = "license" }
 authors = [{ email = "zhenx@zju.edu.cn" }, { name = "Zhen Xu" }]
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 dynamic = ["dependencies", "optional-dependencies"]
 
 [project.urls]
@@ -38,6 +38,12 @@ packages = [
     'easyvolcap.utils',
     'easyvolcap.utils.shaders',
     'easyvolcap.scripts',
+
+    'easyvolcap.configs',
+    'easyvolcap.assets',
+    'easyvolcap.assets.meshes',
+    'easyvolcap.assets.imgs',
+    'easyvolcap.assets.fonts',
 ]
 
 # [tool.setuptools.packages.find]
@@ -45,12 +51,27 @@ packages = [
 # exclude = ["data"]
 # where = ["easyvolcap", "scripts", "main.py"]
 
+[tool.setuptools.package-dir]
+"easyvolcap" = "easyvolcap"
+"easyvolcap.configs" = "configs"
+"easyvolcap.assets" = "assets"
+
 [tool.setuptools.package-data]
 "*" = [
     "*.yaml",
     "*.json",
     "*.py",
     "*.yml",
+
+    "*.ttf",
+    "*.otf",
+    "*.woff",
+    "*.woff2",
+    "*.png",
+    "*.jpg",
+    "*.ply",
+    "*.npz",
+    "*.obj",
 
     "*.frag",
     "*.vert",
@@ -63,17 +84,10 @@ evc-test = "easyvolcap.scripts.wrap:test_entrypoint"
 evc-train = "easyvolcap.scripts.wrap:train_entrypoint"
 
 evc-ws = "easyvolcap.scripts.wrap:ws_entrypoint"
+evc-sig = "easyvolcap.scripts.wrap:sig_entrypoint"
 evc-gui = "easyvolcap.scripts.wrap:gui_entrypoint"
 evc-dist = "easyvolcap.scripts.wrap:dist_entrypoint"
 evc-prof = "easyvolcap.scripts.wrap:prof_entrypoint"
-
-# volcap = "easyvolcap.scripts.wrap:main_entrypoint"
-# volcap-test = "easyvolcap.scripts.wrap:test_entrypoint"
-# volcap-train = "easyvolcap.scripts.wrap:train_entrypoint"
-
-# volcap-gui = "easyvolcap.scripts.wrap:gui_entrypoint"
-# volcap-dist = "easyvolcap.scripts.wrap:dist_entrypoint"
-# volcap-prof = "easyvolcap.scripts.wrap:prof_entrypoint"
 
 # This should only serve as a commanline registration
 # Dependencies are expected to be installed separatedly

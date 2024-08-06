@@ -1,0 +1,25 @@
+# These are configs for training on shorter sequences using the Temporal Gaussian Hierarchy method
+
+configs:
+    - configs/specs/cache_ram.yaml
+
+dataloader_cfg:
+    dataset_cfg: &dataset_cfg
+        frame_sample: [0, 1, 1]
+    batch_sampler_cfg:
+        batch_size: 1 # for shorter sequences, smaller batch size works better
+
+val_dataloader_cfg:
+    dataset_cfg:
+        <<: *dataset_cfg
+
+runner_cfg:
+    epochs: 60
+
+model_cfg:
+    network_cfg:
+        # densify_interval: 25
+        # densify_from_iter: 125
+        # clone_by_sample_xyz: True
+        opacity_reset_interval: 3000
+        densify_until_iter: 15000 # keep densifying

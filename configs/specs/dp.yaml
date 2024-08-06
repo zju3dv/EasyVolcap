@@ -1,0 +1,15 @@
+# MARK: Doesn't work: much larger model but not significantly better results
+
+model_cfg:
+    network_cfg:
+        _delete_: True # will try to scale with the number of epochs for training
+
+        type: TemporalForestGaussianSplatting
+        # min_denom_for_gradient: 3 # prune less non-visible points
+        # densify_through_all: True # will use all iterations for densification instead of doing extra pruning
+        init_points_mode: perframe_sparse+static_dense+perframe_scale+segment_dense+segment_sparse
+        points_dir:
+            perframe_sparse: pcds_roma_3p_7k
+            segment_sparse: pcds_roma_3p_18k_j10
+            segment_dense: dense_pcds_rc_bbox_180k
+            static_dense: dense_pcds_rc_180k/000000.ply

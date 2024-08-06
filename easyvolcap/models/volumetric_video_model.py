@@ -73,19 +73,25 @@ class VolumetricVideoModel(nn.Module):
         self.print_render_progress = print_render_progress
         self.let_user_handle_input = let_user_handle_input
 
-    def render_imgui(self, viewer: 'VolumetricVideoViewer', batch: dotdict):
-        if hasattr(self.camera, 'render_imgui'): self.camera.render_imgui(viewer, batch)
-        if hasattr(self.sampler, 'render_imgui'): self.sampler.render_imgui(viewer, batch)
-        if hasattr(self.network, 'render_imgui'): self.network.render_imgui(viewer, batch)
-        if hasattr(self.renderer, 'render_imgui'): self.renderer.render_imgui(viewer, batch)
-        if hasattr(self.supervisor, 'render_imgui'): self.supervisor.render_imgui(viewer, batch)
+    def move_device(self, device: torch.device):
+        for name, module in self.named_children():
+            if hasattr(module, 'move_device'): module.move_device(device)
 
-    def decorate_grad(self, runner: 'VolumetricVideoRunner', batch: dotdict):
-        if hasattr(self.camera, 'decorate_grad'): self.camera.decorate_grad(runner, batch)
-        if hasattr(self.sampler, 'decorate_grad'): self.sampler.decorate_grad(runner, batch)
-        if hasattr(self.network, 'decorate_grad'): self.network.decorate_grad(runner, batch)
-        if hasattr(self.renderer, 'decorate_grad'): self.renderer.decorate_grad(runner, batch)
-        if hasattr(self.supervisor, 'decorate_grad'): self.supervisor.decorate_grad(runner, batch)
+    def render_imgui(self, viewer: 'VolumetricVideoViewer', batch: dotdict):
+        for name, module in self.named_children():
+            if hasattr(module, 'render_imgui'): module.render_imgui(viewer, batch)
+
+    def decorate_grads(self, runner: 'VolumetricVideoRunner', batch: dotdict):
+        for name, module in self.named_children():
+            if hasattr(module, 'decorate_grads'): module.decorate_grads(runner, batch)
+
+    def decorate_params(self, runner: 'VolumetricVideoRunner', batch: dotdict):
+        for name, module in self.named_children():
+            if hasattr(module, 'decorate_params'): module.decorate_params(runner, batch)
+
+    def prepare_params(self, runner: 'VolumetricVideoRunner', batch: dotdict):
+        for name, module in self.named_children():
+            if hasattr(module, 'prepare_params'): module.prepare_params(runner, batch)
 
     def render_volume(self, xyz: torch.Tensor, dir: torch.Tensor, t: torch.Tensor, dist: torch.Tensor, batch: dotdict):
         # Network
@@ -115,9 +121,9 @@ class VolumetricVideoModel(nn.Module):
         return output
 
     def prepare_camera(self, batch: dotdict):
-        batch.K = to_x(batch.K, self.dtype)
-        batch.R = to_x(batch.R, self.dtype)
-        batch.T = to_x(batch.T, self.dtype)
+        batch.K = batch.K.type(self.dtype)
+        batch.R = batch.R.type(self.dtype)
+        batch.T = batch.T.type(self.dtype)
 
         # Maybe forward input camera parameters
         if self.training or (self.apply_optcam and args.type != 'gui'):
@@ -125,35 +131,35 @@ class VolumetricVideoModel(nn.Module):
 
         # Always forward IBR required camera parameters
         if 'src_exts' in batch:
-            batch.src_exts = to_x(batch.src_exts, self.dtype)
-            batch.src_ixts = to_x(batch.src_ixts, self.dtype)
+            batch.src_exts = batch.src_exts.type(self.dtype)
+            batch.src_ixts = batch.src_ixts.type(self.dtype)
             batch = self.camera.forward_srcs(batch)  # MARK: NO SYNC FOR NOW
 
         # Maybe forward input ray directions
         if 'ray_o' in batch:
-            batch.ray_o = to_x(batch.ray_o, self.dtype)
-            batch.ray_d = to_x(batch.ray_d, self.dtype)
+            batch.ray_o = batch.ray_o.type(self.dtype)
+            batch.ray_d = batch.ray_d.type(self.dtype)
             if self.training or (self.apply_optcam and args.type != 'gui'):
                 batch.ray_o, batch.ray_d = self.camera.forward_rays(batch.ray_o, batch.ray_d, batch, self.use_z_depth, self.correct_pix)
 
         if 't' in batch:
-            batch.t = to_x(batch.t, self.dtype)
+            batch.t = batch.t.type(self.dtype)
 
         if 'n' in batch:
-            batch.n = to_x(batch.n, self.dtype)
-            batch.f = to_x(batch.f, self.dtype)
+            batch.n = batch.n.type(self.dtype)
+            batch.f = batch.f.type(self.dtype)
 
         if 'near' in batch:
-            batch.near = to_x(batch.near, self.dtype)
-            batch.far = to_x(batch.far, self.dtype)
+            batch.near = batch.near.type(self.dtype)
+            batch.far = batch.far.type(self.dtype)
 
         if 'bounds' in batch:
-            batch.bounds = to_x(batch.bounds, self.dtype)
+            batch.bounds = batch.bounds.type(self.dtype)
 
         if 'xyz' in batch:
-            batch.xyz = to_x(batch.xyz, self.dtype)
-            batch.dir = to_x(batch.dir, self.dtype)
-            batch.dist = to_x(batch.dist, self.dtype)
+            batch.xyz = batch.xyz.type(self.dtype)
+            batch.dir = batch.dir.type(self.dtype)
+            batch.dist = batch.dist.type(self.dtype)
 
         return batch
 

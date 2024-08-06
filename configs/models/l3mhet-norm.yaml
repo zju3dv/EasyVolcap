@@ -2,4 +2,6 @@ configs: configs/models/l3mhet.yaml
 
 model_cfg:
     supervisor_cfg:
-        norm_smooth_weight: 0.001 # smoothing
+        norm_smooth_weight: 1.0e-6 # smoothing
+        # msk_loss_weight: 10.0
+        # prop_loss_weight: 100.0

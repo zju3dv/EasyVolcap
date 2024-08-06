@@ -4,7 +4,7 @@
 val_dataloader_cfg:
     dataset_cfg:
         type: GeometryDataset
-        # skip_loading_images: True
+        # disk_dataset: True
         cache_raw: False
         remove_outlier: False
         # vhull_thresh: 1.0

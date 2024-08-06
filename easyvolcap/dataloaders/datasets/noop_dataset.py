@@ -21,6 +21,7 @@ class NoopDataset(Dataset):
                  bounds: List[List[float]] = torch.as_tensor([[-5, -5, -5], [5, 5, 5]]),
                  render_ratio: float = 1.0,
                  focal_ratio: float = 1.0,
+                 duration: float = 1.0,
 
                  imbound_crop: bool = True,
                  use_objects_priors: bool = False,
@@ -41,6 +42,10 @@ class NoopDataset(Dataset):
 
         self.imbound_crop = imbound_crop
         self.use_objects_priors = use_objects_priors
+
+        self.duration = duration
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
     def __len__(self):
         return self.n_latents * self.n_views
@@ -87,37 +92,4 @@ class NoopDataset(Dataset):
 
     def physical_to_virtual(self, latent_index): return latent_index
 
-    def get_viewer_batch(self, output: dotdict):
-        # Source indices
-        t = output.t
-        v = output.v
-        bounds = output.bounds  # camera bounds
-        frame_index = self.t_to_frame(t)
-        camera_index = self.v_to_camera(v)
-        latent_index = self.frame_to_latent(frame_index)
-        view_index = self.camera_to_view(camera_index)
-
-        # Update indices, maybe not needed
-        output.view_index = view_index
-        output.frame_index = frame_index
-        output.camera_index = camera_index
-        output.latent_index = latent_index
-        output.meta.view_index = view_index
-        output.meta.frame_index = frame_index
-        output.meta.camera_index = camera_index
-        output.meta.latent_index = latent_index
-
-        output.bounds = self.get_bounds(latent_index)  # will crop according to batch bounds
-        output.bounds[0] = torch.maximum(output.bounds[0], bounds[0])  # crop according to user bound
-        output.bounds[1] = torch.minimum(output.bounds[1], bounds[1])
-        output.meta.bounds = output.bounds
-
-        output = self.scale_ixts(output, self.render_ratio)
-
-        if self.imbound_crop:
-            output = self.crop_ixts_bounds(output)
-
-        if self.use_objects_priors:
-            output = self.get_objects_priors(output)
-
-        return output
+    def get_viewer_batch(self, *args, **kwargs): return VolumetricVideoDataset.get_viewer_batch(self, *args, **kwargs)

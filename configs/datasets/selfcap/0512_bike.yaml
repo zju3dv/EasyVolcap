@@ -1,0 +1,43 @@
+configs: configs/datasets/selfcap/selfcap.yaml # inherit from this config
+dataloader_cfg:
+    dataset_cfg: &dataset_cfg
+        data_root: data/selfcap/0512_bike
+        # intri_file: aligned/intri.yml # why?
+        # extri_file: aligned/extri.yml
+        # intri_file: unshared/intri.yml # why?
+        # extri_file: unshared/extri.yml
+        scene_scale: 2.2857
+        near: 1.5
+        far: 50.0 # camera near far range, affects ray sampling and some cost volume based algorithms
+        bounds: [[-8.0466, -2.6321, 1.0405], [10.8316, 3.3453, 16.4315]]
+        # bounds: [[-1.9, -1.0, -2.0], [3.5, 2.8, 6.3]] # dynamic bounds
+
+val_dataloader_cfg:
+    dataset_cfg:
+        <<: *dataset_cfg
+
+viewer_cfg:
+    window_size: [1080, 1080]
+    camera_cfg:
+        origin: [0.985, 1.113, 5.240]
+        world_up: [0, -1.0, 0]
+        n: 1.5
+        f: 50.0
+        K:
+            [
+                [874.8922066934, 0.0000000000, 540.4826062668],
+                [0.0000000000, 876.2968226391, 526.9641329693],
+                [0.0000000000, 0.0000000000, 1.0000000000],
+            ]
+        R:
+            [
+                [0.9997997104, 0.0050622885, 0.0193626532],
+                [-0.0018139211, 0.9864199250, -0.1642328873],
+                [-0.0199311012, 0.1641648708, 0.9862315379],
+            ]
+        T: [-1.2076132288, -0.5839302470, 0.3891906185]
+# python scripts/triangulate_evc.py --data_root /mnt/selfcap/selfcap/0512_bike --pairs "(('0001','0002'),('0008','0009'),('0020','0021'))" --bounds "[[-1.9, -1.0, -2.0], [3.5, 2.8, 6.3]]" --n_points 18000 --start_idx 0 --end_idx 37377 --output_dir pcds_roma_3p
+
+# evc-gui -c configs/base.yaml,configs/datasets/selfcap/0512_bike.yaml,configs/models/enerfi.yaml,configs/specs/static.yaml,configs/specs/fp16.yaml exp_name=enerfi_dtu model_cfg.sampler_cfg.n_planes=32,8 model_cfg.sampler_cfg.n_samples=4,1
+
+# evc-gui -c configs/base.yaml,configs/datasets/selfcap/0512_bike.yaml,configs/models/enerfi.yaml,configs/specs/static.yaml exp_name=enerfi_dtu val_dataloader_cfg.dataset_cfg.ratio=0.5 viewer_cfg.render_ratio=0.5 viewer_cfg.window_size=512,512

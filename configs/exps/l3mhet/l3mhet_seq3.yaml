@@ -1,0 +1,45 @@
+configs:
+    - configs/base.yaml # default arguments for the whole codebase
+    - configs/models/l3mhet.yaml # network model configuration
+    - configs/datasets/badminton/seq3.yaml # dataset usage configuration
+    - configs/specs/optcam.yaml
+    - configs/specs/transient.yaml
+
+# runner_cfg:
+#     optimizer_cfg:
+#         lr: 1.0e-3
+
+# _: &mlp_size
+#     parameterizer_cfg:
+#         radius: 3.0
+#     xyzt_embedder_cfg:
+#         xyz_embedder_cfg:
+#             type: TcnnHashEmbedder
+#             bounds: [[-5.0, -5.0, -5.0], [5.0, 5.0, 5.0]]
+
+# # Always define full model config
+# model_cfg:
+#     network_cfg:
+#         <<: *mlp_size
+#         network_cfgs:
+#             '0': # coarse network config
+#                 <<: *mlp_size
+#             '1': # coarse network config
+#                 <<: *mlp_size
+#             '2':
+#                 <<: *mlp_size
+
+common: &common
+    frame_sample: [169, 170, 1] # only one frame
+
+dataloader_cfg:
+    dataset_cfg:
+        <<: *common
+        view_sample: [0, null, 1] # use all available views
+
+val_dataloader_cfg:
+    dataset_cfg:
+        <<: *common
+
+# prettier-ignore
+exp_name: {{fileBasenameNoExtension}}

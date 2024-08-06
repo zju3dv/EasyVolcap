@@ -10,6 +10,7 @@
 
 ***News***:
 
+- 24.08.06 Multiple feature updates. See [changelog.md](docs/misc/changelog.md).
 - 24.02.27 [***4K4D***](https://zju3dv.github.io/4k4d) has been accepted to CVPR 2024.
 - 23.12.13 ***EasyVolcap*** will be presented at SIGGRAPH Asia 2023, Sydney.
 - 23.10.17 [***4K4D***](https://zju3dv.github.io/4k4d), a real-time 4D view synthesis algorithm developed using ***EasyVolcap***, has been made public.
@@ -29,19 +30,20 @@ Install only the core dependencies for running the viewer locally:
 pip install -v -e . 
 ```
 
-On Windows, you might end up with a CPU-only PyTorch installation by only running the above command since only the CPU version for Windows is available on PyPI ([more info](https://github.com/pmeier/light-the-torch?tab=readme-ov-file#why-do-i-need-it)).
+On Windows or older versions of Linux, you might end up with a CPU-only PyTorch installation by only running the above command since only the CPU version for Windows is available on PyPI ([more info](https://github.com/pmeier/light-the-torch?tab=readme-ov-file#why-do-i-need-it)).
 
 To install a cuda-enabled PyTorch, append the above command with an extra search link:
 
 ```shell
 pip install -v -e . -f https://download.pytorch.org/whl/torch_stable.html
+# also try directly installing PyTorch with pip install torch --index-url https://download.pytorch.org/whl/cu118 or https://download.pytorch.org/whl/cu121 if you're still unable to install a CUDA enabled version of PyTorch, as per suggested on https://pytorch.org/get-started/locally/
 ```
 
 ### Development Install Using `pip`
 
 Or install all dependencies for development (this requires you to have a valid [CUDA building environment with PyTorch already installed](docs/design/install.md#cuda-related-compilations)).
 
-Note that you can just run these two in tandem for to take care of `PyTorch` and `EasyVolcap` before compiling CUDA extensions:
+Note that you can just run these two in tandem to take care of `PyTorch` and `EasyVolcap` before compiling CUDA extensions:
 
 ```shell
 # Editable install, with dependencies from requirements-devel.txt
@@ -108,16 +110,16 @@ evc-gui -c configs/exps/enerfi/enerfi_${expname}.yaml,configs/specs/fp16.yaml ex
 evc-gui -c configs/exps/enerfi/enerfi_${expname}.yaml,configs/specs/fp16.yaml exp_name=enerfi_dtu val_dataloader_cfg.dataset_cfg.ratio=0.5 model_cfg.sampler_cfg.n_planes=32,8 model_cfg.sampler_cfg.n_samples=4,1 # 5.0 FPS on 3060
 ```
 
-*Note that ***EasyVolcap*** supports WebSocket based server-side rendering.* [More info](docs/design/websocket.md).
+*Note that ***EasyVolcap*** supports WebSocket-based server-side rendering.* [More info](docs/design/websocket.md).
 
-To use the WebSocket based rendering, append the config `server.yaml` to any of the native rendering command beginning with `evc-gui`.
+To use the WebSocket-based rendering, append the config `server.yaml` to any of the native rendering commands beginning with `evc-gui`.
 
 ```shell
 # Run the rendering server, append `configs/specs/server.yaml` to the config file list
 evc-gui -c configs/exps/enerfi/enerfi_${expname}.yaml,configs/specs/server.yaml exp_name=enerfi_dtu val_dataloader_cfg.dataset_cfg.ratio=0.5 model_cfg.sampler_cfg.n_planes=32,8 model_cfg.sampler_cfg.n_samples=4,1
 ```
 
-And run the viewer in your desired viewing client, tested on Windows, MacOS and Linux.
+Then run the viewer in your desired viewing client, tested on Windows, MacOS and Linux.
 
 ```shell
 # Separate WebSocket Client parameter and evc parameter with --, for now, the viewer can be configured with evc
@@ -149,7 +151,7 @@ evc-test -c configs/exps/l3mhet/l3mhet_${expname}.yaml,configs/specs/spiral.yaml
 # And maybe render the model with GUI in lower resolution
 evc-gui -c configs/exps/l3mhet/l3mhet_${expname}.yaml viewer_cfg.render_ratio=0.15
 ```
-[`configs/specs/spiral.yaml`](configs/specs/spiral.yaml): please check this file for more details, it's a collection of configs to tell the dataloader and visualizer to generate a spiral path by interpolating the given cameras
+[`configs/specs/spiral.yaml`](configs/specs/spiral.yaml): please check this file for more details, it's a collection of configs to tell the data loader and visualizer to generate a spiral path by interpolating the given cameras
 
 
 ### Running 3DGS+T
@@ -219,7 +221,7 @@ Before writing your new volumetric video algorithm, we need a basic understandin
 **We use Python dictionaries for passing in and out network input and output.**
 
 1. The `batch` variable stores the network input you sampled from the dataset (e.g. camera parameters).
-2. The `output` key of the `batch` variable should contain the network output. For each network module's output definition, please refer to the [design documents](docs/design/main.md) of them (`camera`, `sampler`, `network`, `renderer`) or just see the definitions in [`volumetric_video_model.py`](easyvolcap/models/volumetric_video_model.py) (the `render_rays` function).
+2. The `output` key of the `batch` variable should contain the network output. For each network module's output definition, please refer to the [design documents](docs/design/main.md) for them (`camera`, `sampler`, `network`, `renderer`) or just see the definitions in [`volumetric_video_model.py`](easyvolcap/models/volumetric_video_model.py) (the `render_rays` function).
 
 <!-- There are generally two ways of developing a new algorithm: -->
 **We support purely customized network construction & usage and also a unified NeRF-like pipeline.**
@@ -227,7 +229,9 @@ Before writing your new volumetric video algorithm, we need a basic understandin
 1. If your new network model's structure is similar to NeRF-based ones (i.e. with the separation of `sampler`, `network` and `renderer`), you can simply swap out parts of the [`volumetric_video_network.py`](easyvolcap/models/networks/volumetric_video_network.py) by writing a new config to swap the `type` parameter of the `***_cfg` dictionaries.
 2. If you'd like to build a completely new network model: to save you some hassle, we grant the `sampler` classes the ability to directly output the core network output (`rgb_map` stored in `batch.output`). Define your rendering function and network structure however you like and reuse other parts of the codebase. An example: [`gaussiant_sampler.py`](easyvolcap/models/samplers/gaussiant_sampler.py).
 
-**A miminal custom moduling using all other ***EasyVolcap*** components should look something like this:**
+- [ ] TODO: Replace the custom sampler with a custom network, an example: `TemporalForestGaussianSplatting`
+
+**A miminal custom module using all other ***EasyVolcap*** components should look something like this:**
 
 ```python
 from easyvolcap.engine import SAMPLERS
@@ -251,7 +255,7 @@ class CustomVolumetricVideoModule(VolumetricVideoModule):
         batch.output.rgb_map = ... # store rendered image for loss (B, N, 3)
 ```
 
-In the respective config, selecte this module with:
+In the respective config, select this module with:
 
 ```yaml
 model_cfg:
@@ -280,13 +284,13 @@ data/dataset/sequence # data_root & data_root
     └── 000059
 ```
 
-***EasyVolcap*** is designed to work on the simplest data form: `images` and no more. The key data preprocessing are done in the `dataloader` and `dataset` modules. These steps are done in the dataloader's initialization
+***EasyVolcap*** is designed to work on the simplest data form: `images` and no more. The key data preprocessing are done in the `dataloader` and `dataset` modules. These steps are done in the data loader's initialization
 1. We might correct the camera pose with their center of attention and world-up vector (`dataloader_cfg.dataset_cfg.use_aligned_cameras=True`).
 2. We undistort read images from the disk using the intrinsic poses and store them as jpeg bytes in memory.
 
 ### Importing ***EasyVolcap***
 
-***EasyVolcap*** now supports direct import from other locations & codebases.
+***EasyVolcap*** now supports direct import from other locations and code bases.
 After installing, you can not only directly use utility modules and functions from `easyvolcap.utils`, but also import and build upon our core modules and classes.
 
 ```python
@@ -313,7 +317,7 @@ If you see warnings when importing ***EasyVolcap*** in your editor like VSCode, 
 }
 ```
 
-Another solution is to replace the installation command of ***EasyVolcap*** with a compatible one [using compatible editable install](https://microsoft.github.io/pyright/#/import-resolution?id=editable-installs):
+Another solution is to replace the installation command of ***EasyVolcap*** with a compatible one [using a compatible editable install](https://microsoft.github.io/pyright/#/import-resolution?id=editable-installs):
 
 ```shell
 pip install -e . --no-build-isolation --no-deps --config-settings editable_mode=compat

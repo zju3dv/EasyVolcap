@@ -30,8 +30,8 @@ import sys
 try:
     sep_ind = sys.argv.index('--')
     our_args = sys.argv[1:sep_ind]
-    evv_args = sys.argv[sep_ind + 1:]
-    sys.argv = [sys.argv[0]] + evv_args
+    evc_args = sys.argv[sep_ind + 1:]
+    sys.argv = [sys.argv[0]] + evc_args
 except ValueError as e:
     # pass # skip if no -- is present
     our_args = sys.argv
@@ -185,7 +185,7 @@ class Viewer(VolumetricVideoViewer):
 async def websocket_client():
     global image
     global viewer
-    log(f'Connecting to remote server: {path(uri)}')
+    log(f'Connecting to remote server: {blue(uri)}')
     async with websockets.connect(uri) as websocket:
         while True:
             timer.record('other', log_interval=2.0)
@@ -200,6 +200,8 @@ async def websocket_client():
             timer.record('receive', log_interval=2.0)
 
             try:
+                # https://github.com/pytorch/vision/issues/4378
+                # Still not fixed even to this day? CUDA 12.1 seems fine
                 buffer = decode_jpeg(torch.from_numpy(np.frombuffer(buffer, np.uint8)), device='cuda')  # 10ms for 1080p...
             except RuntimeError as e:
                 buffer = decode_jpeg(torch.from_numpy(np.frombuffer(buffer, np.uint8)), device='cpu')  # 10ms for 1080p...

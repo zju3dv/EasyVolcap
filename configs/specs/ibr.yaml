@@ -1,5 +1,5 @@
 val_dataloader_cfg:
     dataset_cfg:
         type: ImageBasedInferenceDataset
-        skip_loading_images: False
+        disk_dataset: False
         append_gt_prob: 1.0

@@ -7,7 +7,7 @@ import trimesh
 from glob import glob
 from os.path import join, exists, dirname
 
-from easymocap.mytools.file_utils import read_json
+from easyvolcap.utils.file_utils import read_json
 from easyvolcap.utils.easy_utils import load_bodymodel
 from easyvolcap.utils.console_utils import *
 

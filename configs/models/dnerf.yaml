@@ -5,18 +5,21 @@ runner_cfg:
     optimizer_cfg:
         lr: 5.0e-4
     moderator_cfg:
-        type: DatasetRatioModerator
-        milestones: [[0, 0.25], [500, 0.5], [1000, 1.0]]
+        type: DatasetCenterCropRatioModerator
+        milestones: [[0, 0.5], [500, 1.0]]
+    scheduler_cfg:
+        type: ExponentialLR
+    decay_epochs: 1000
 
 dataloader_cfg:
     dataset_cfg:
         n_rays: 512
-    batch_sampler_cfg:
-        batch_size: 1
     sampler_cfg:
         type: IterationBasedRandomSampler
-        num_samples: 800000 # !: CONFIG, runner_cfg.epochs * runner_cfg.eval_ep
+        num_samples: 800000 # !: CONFIG, {runner_cfg.epochs} * {runner_cfg.eval_ep}
         num_warmups: 100000
+    batch_sampler_cfg:
+        batch_size: 1
 
 dnerf_networks: &dnerf_networks
     geo_use_xyzt_feat: False
@@ -43,6 +46,7 @@ dnerf_networks: &dnerf_networks
         type: SplitRegressor
         width: 256
         depth: 8
+        activs: [ReLU, Identity] # has to be ReLU
     dir_embedder_cfg:
         type: PositionalEncodingEmbedder
         multires: 4
@@ -50,25 +54,30 @@ dnerf_networks: &dnerf_networks
         type: EmptyEmbedder
     appearance_cfg:
         type: MlpRegressor
-        width: 256
-        depth: 2
+        width: 128
+        depth: 1
         out_dim: 3
 
 model_cfg:
     sampler_cfg:
         type: ImportanceSampler
-        n_samples: [64, 64, 64, 64]
+        n_samples: [64, 128]
+        normalize_weights: True
+        weight_padding: 0.00001
+        fine_freespace_ratio: 0.0
+        concat_coarse_samples: True
     network_cfg:
+        <<: *dnerf_networks
         network_cfgs:
-            '0':
-                <<: *dnerf_networks
-                appearance_cfg:
-                    type: EmptyRegressor
-            '1':
-                <<: *dnerf_networks
+            - 
+              type: VolumetricVideoNetwork
+              <<: *dnerf_networks
     supervisor_cfg:
         type: VolumetricVideoSupervisor
         img_loss_weight: 1.0
-        msk_loss_weight: 0.01
-        prop_loss_weight: 1.0
-        resd_loss_weight: 0.0001
+        img_loss_type: L2
+        msk_loss_weight: 0.0
+        prop_loss_weight: 0.0
+        resd_loss_weight: 0.0
+    renderer_cfg:
+        normalize_weights: True

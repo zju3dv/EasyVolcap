@@ -30,6 +30,12 @@ from easyvolcap.engine.registry import Registry, call_from_cfg, callable_from_cf
 from easyvolcap.engine.config import Config, DictAction, ConfigDict
 from easyvolcap.utils.console_utils import *
 
+# Check whether we're in a directory where another installation of EasyVolcap exists
+if exists('easyvolcap/engine/__init__.py') and not abspath('easyvolcap/engine/__init__.py') == __file__:
+    print(yellow(f'Found an existing EasyVolcap repo at the current dir: {blue(os.getcwd())}'))
+    print(yellow(f'However, the EasyVolcap being imported is located at: {blue(dirname(dirname(dirname(__file__))))}, please be ware of this potential conflict'))
+    print(yellow(f'To use the EasyVolcap repo in the current directory, run the command: `{cyan("pip install -v -e. --no-deps --no-build-isolation")}` here'))
+
 # Here we predefine a list of valid registers to be used in the construction and expansion of this repos
 VISUALIZERS = Registry('visualizers')  # MARK: (constantly changed)
 EVALUATORS = Registry('evaluators')  # (rarely changed)
@@ -66,9 +72,9 @@ RECORDERS = Registry('recorders')  # (rarely changed)
 
 def get_parser():
     parser = argparse.ArgumentParser(prog='evc', description='EasyVolcap Project')
-    parser.add_argument('-c', '--config', type=str, default="", help='Config file path')
+    parser.add_argument('-c', '--config', type=str, default="", help='Config file path, can be comma (not space) separated files, will inherit as ordered')
     parser.add_argument('-t', "--type", type=str, choices=['train', 'test', 'gui'], default="train", help='Execution mode, train, test or gui')  # evalute, visualize, network, dataset? (only valid when run)
-    parser.add_argument("opts", action=DictAction, nargs=argparse.REMAINDER)
+    parser.add_argument("opts", action=DictAction, nargs=argparse.REMAINDER, help='dictionary like parameters (runner_cfg.resume=False), see configs/base.yaml for more options')
     return parser
 
 
@@ -94,7 +100,7 @@ def parse_cfg(args):
     cfg = Config(
         dotdict(
             exp_name='base',
-            dataloader_cfg=dotdict(dataset_cfg=dotdict()),
+            dataloader_cfg=dotdict(dataset_cfg=dotdict(), batch_sampler_cfg=dotdict(batch_size=1)),
             runner_cfg=dotdict(ep_iter=500, epochs=400, visualizer_cfg=dotdict(save_tag='', result_dir='')),
             viewer_cfg=dotdict(type='VolumetricVideoViewer'),
             fix_random=False,
@@ -105,7 +111,10 @@ def parse_cfg(args):
         )
     )  # empty base config for evil global config imports
 
-    if exists(args.config):
+    if args.config and not exists(args.config):
+        args.config = f'{dirname(__file__)}/../../{args.config}'
+
+    if exists(args.config) and os.path.isfile(args.config):
         cfg.merge_from_dict(Config.fromfile(args.config))  # load external configuration file (with hierarchy)
         cfg.merge_from_dict(args.opts)  # load commandline arguments
         cfg = update_cfg(cfg)

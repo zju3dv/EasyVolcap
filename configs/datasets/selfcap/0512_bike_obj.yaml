@@ -1,0 +1,9 @@
+configs: configs/datasets/selfcap/0512_bike.yaml
+
+dataloader_cfg: &dataloader_cfg
+    dataset_cfg: &dataset_cfg # ratio: 0.5
+        bounds: [[-1.9, -1.0, -2.0], [3.5, 2.8, 6.3]] # dynamic bounds
+
+val_dataloader_cfg:
+    dataset_cfg:
+        <<: *dataset_cfg

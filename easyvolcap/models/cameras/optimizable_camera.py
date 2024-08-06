@@ -95,26 +95,33 @@ class OptimizableCamera(nn.Module):
 
         self.pre_handle = self._register_load_state_dict_pre_hook(self._load_state_dict_pre_hook)
 
+    @torch.no_grad()
     def _load_state_dict_pre_hook(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
 
         # Historical reasons
-        if prefix + 'pose_resd' in state_dict:
-            state_dict[prefix + 'extri_resd'] = state_dict[prefix + 'pose_resd']
-            del state_dict[prefix + 'pose_resd']
+        if f'{prefix}pose_resd' in state_dict:
+            state_dict[f'{prefix}extri_resd'] = state_dict[f'{prefix}pose_resd']
+            del state_dict[f'{prefix}pose_resd']
 
-        if prefix + 'extri_resd' in state_dict:
-            if state_dict[prefix + 'extri_resd'].shape[0] == self.n_views and state_dict[prefix + 'extri_resd'].shape[1] == self.n_frames:
-                state_dict[prefix + 'extri_resd'] = state_dict[prefix + 'extri_resd'].transpose(0, 1)
+        if f'{prefix}extri_resd' in state_dict:
+            if state_dict[f'{prefix}extri_resd'].shape[0] == self.n_views and state_dict[f'{prefix}extri_resd'].shape[1] == self.n_frames:
+                state_dict[f'{prefix}extri_resd'] = state_dict[f'{prefix}extri_resd'].transpose(0, 1)
 
-        if prefix + 'intri_resd' in state_dict:
-            if state_dict[prefix + 'intri_resd'].shape[0] == self.n_views and state_dict[prefix + 'intri_resd'].shape[1] == self.n_frames:
-                state_dict[prefix + 'intri_resd'] = state_dict[prefix + 'intri_resd'].transpose(0, 1)
+        if f'{prefix}intri_resd' in state_dict:
+            if state_dict[f'{prefix}intri_resd'].shape[0] == self.n_views and state_dict[f'{prefix}intri_resd'].shape[1] == self.n_frames:
+                state_dict[f'{prefix}intri_resd'] = state_dict[f'{prefix}intri_resd'].transpose(0, 1)
 
-        if prefix + 'extri_resd' not in state_dict:
-            state_dict[prefix + 'extri_resd'] = self.extri_resd
+        if f'{prefix}extri_resd' not in state_dict:
+            state_dict[f'{prefix}extri_resd'] = self.extri_resd
 
-        if prefix + 'intri_resd' not in state_dict:
-            state_dict[prefix + 'intri_resd'] = self.intri_resd
+        if f'{prefix}intri_resd' not in state_dict:
+            state_dict[f'{prefix}intri_resd'] = self.intri_resd
+
+        if f'{prefix}extri_resd' in state_dict and self.extri_resd.shape != state_dict[f'{prefix}extri_resd']:
+            self.extri_resd.set_(state_dict[f'{prefix}extri_resd'].to(self.extri_resd))
+
+        if f'{prefix}intri_resd' in state_dict and self.intri_resd.shape != state_dict[f'{prefix}intri_resd']:
+            self.intri_resd.set_(state_dict[f'{prefix}intri_resd'].to(self.intri_resd))
 
     def forward_srcs(self, batch: dotdict):
         s_inds = batch.src_inds  # B, S, selected source views

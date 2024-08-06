@@ -1,4 +1,4 @@
-torch>=2.1.0 # if you've used environment.yml, this will be a no-op
+torch>=1.12.0 # if you've used environment.yml, this will be a no-op
 av
 tqdm
 pdbr
@@ -9,15 +9,20 @@ regex; sys_platform=='win32'
 PyGLM
 scipy
 numpy
+sympy
 addict
 PyYaml
+psutil
 ipython
 trimesh
 imageio
+PyOpenGL
+pycolmap
 PyMCubes
 pypiwin32; sys_platform=='win32'
 pyperclip
 pyntcloud
+fast_gauss
 torchaudio
 websockets
 torchvision

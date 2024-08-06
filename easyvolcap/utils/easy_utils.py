@@ -165,6 +165,8 @@ def write_camera(cameras: dict, path: str, intri_name: str = '', extri_name: str
         if 'D' not in val:
             if 'dist' in val: val.D = val.dist
             else: val.D = np.zeros((5, 1))
+        if val.D.shape[0] == 1 and val.D.shape[1] == 4:
+            val.D = np.concatenate([val.D.T, np.zeros_like(val.D.T[:1])])
         intri.write('D_{}'.format(key), val.D.reshape(5, 1))
 
         # Extrinsics
@@ -184,6 +186,9 @@ def write_camera(cameras: dict, path: str, intri_name: str = '', extri_name: str
 
         # Color correction matrix
         if 'ccm' in val: intri.write('ccm_{}'.format(key), val.ccm)
+
+        # Fisheye distrotion (deep view video)
+        if 'rdist' in val: intri.write('rdist_{}'.format(key), val.rdist)
 
     # # Averaged camera matrix (optional)
     # if 'c2w_avg' in cameras:
@@ -254,7 +259,7 @@ def load_bodymodel(data_root: str, bodymodel_file: str, device='cpu'):
 
 
 def load_smpl(x):
-    from easymocap.mytools.file_utils import read_annot
+    from easyvolcap.utils.file_utils import read_annot
     from easyvolcap.utils.data_utils import to_tensor
 
     data = read_annot(x)[0]  # NOTE: singe person only

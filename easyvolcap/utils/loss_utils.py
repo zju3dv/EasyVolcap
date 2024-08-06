@@ -257,15 +257,17 @@ def reg_raw_crit(x: torch.Tensor, iter_step: int, max_weight: float = 1e-4, ann_
     return loss, weight
 
 
-def lpips(x: torch.Tensor, y: torch.Tensor):
+def lpips(x: torch.Tensor, y: torch.Tensor, net='alex'):  # for computing loss, use alex, faster
     # B, 3, H, W
     # B, 3, H, W
-    if not hasattr(lpips, 'compute_lpips'):
+    if not hasattr(lpips, 'net_map'):
+        lpips.net_map = dotdict()
+    if net not in lpips.net_map:
         import lpips as lpips_module
-        log('Initializing LPIPS network')
-        lpips.compute_lpips = lpips_module.LPIPS(net='vgg', verbose=False).cuda()
+        log(f'Initializing LPIPS network: {green(net)}')
+        lpips.net_map[net] = lpips_module.LPIPS(net=net, verbose=False).cuda()
 
-    return lpips.compute_lpips(x.cuda() * 2 - 1, y.cuda() * 2 - 1).mean()
+    return lpips.net_map[net](x.cuda() * 2 - 1, y.cuda() * 2 - 1).mean()
 
 
 def eikonal(x: torch.Tensor, th=1.0) -> torch.Tensor:
@@ -350,7 +352,7 @@ def mIoU_loss(x: torch.Tensor, y: torch.Tensor):
     """
     I = (x * y).sum(-1).sum(-1)
     U = (x + y).sum(-1).sum(-1) - I
-    mIoU = (I / U.detach()).mean()
+    mIoU = (I / (U.detach() + 1e-8)).mean()  # avoid nans
     return 1 - mIoU
 
 
@@ -541,14 +543,14 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
         return ssim_map.mean(1).mean(1).mean(1)
 
 
-def ssim(x: torch.Tensor, y: torch.Tensor):
-    from pytorch_msssim import ssim as compute_ssim
-    return compute_ssim(x, y, data_range=1.0, win_size=11, win_sigma=1.5, K=(0.01, 0.03))
+def ssim(x: torch.Tensor, y: torch.Tensor, data_range=1.0, win_size=11, win_sigma=1.5, K=(0.01, 0.03)):
+    from easyvolcap.utils.ssim_utils import ssim as compute_ssim
+    return compute_ssim(x, y, data_range=data_range, win_size=win_size, win_sigma=win_sigma, K=K)
 
 
-def msssim(x: torch.Tensor, y: torch.Tensor):
-    from pytorch_msssim import ms_ssim as compute_msssim
-    return compute_msssim(x, y, data_range=1.0, win_size=11, win_sigma=1.5, K=(0.01, 0.03))
+def msssim(x: torch.Tensor, y: torch.Tensor, data_range=1.0, win_size=11, win_sigma=1.5, K=(0.01, 0.03)):
+    from easyvolcap.utils.ssim_utils import ms_ssim as compute_msssim
+    return compute_msssim(x, y, data_range=data_range, win_size=win_size, win_sigma=win_sigma, K=K)
 
 
 # from MonoSDF

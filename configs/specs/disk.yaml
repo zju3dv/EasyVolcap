@@ -1,0 +1,7 @@
+dataloader_cfg:
+    dataset_cfg:
+        disk_dataset: True
+
+val_dataloader_cfg:
+    dataset_cfg:
+        disk_dataset: True

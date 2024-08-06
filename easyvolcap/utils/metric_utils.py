@@ -40,7 +40,7 @@ def lpips(x: torch.Tensor, y: torch.Tensor):
     if y.ndim == 3: y = y.unsqueeze(0)
     x = x.permute(0, 3, 1, 2)
     y = y.permute(0, 3, 1, 2)
-    return compute_lpips(x, y).item()
+    return compute_lpips(x, y, net='vgg').item()
 
 
 class Metrics(Enum):

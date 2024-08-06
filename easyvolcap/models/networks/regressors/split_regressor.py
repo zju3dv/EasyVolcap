@@ -1,6 +1,7 @@
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 from easyvolcap.engine import REGRESSORS
 from easyvolcap.utils.net_utils import MLP, Modulized, get_function
@@ -27,7 +28,7 @@ class SplitRegressor(nn.Module):
         super().__init__()
 
         self.in_dim = in_dim
-        self.out_dim = sum(splits)  
+        self.out_dim = sum(splits)
         self.width = width
         self.depth = depth
         self.sequential_split = sequential_split

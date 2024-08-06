@@ -1,3 +1,4 @@
+import math
 import torch
 
 
@@ -14,7 +15,7 @@ def normalize_sum(x: torch.Tensor, eps: float = 1e-8):
 # Strange synchronization here if using torch.jit.script
 
 
-@torch.jit.script
+# @torch.jit.script
 def point_padding(v: torch.Tensor):
     pad = torch.zeros_like(v[..., -1:])
     pad[..., -1] = 1.0
@@ -22,14 +23,14 @@ def point_padding(v: torch.Tensor):
     return ext
 
 
-@torch.jit.script
+# @torch.jit.script
 def vector_padding(v: torch.Tensor):
     pad = torch.zeros_like(v[..., -1:])
     ext = torch.cat([v, pad], dim=-1)
     return ext
 
 
-@torch.jit.script
+# @torch.jit.script
 def affine_padding(c2w: torch.Tensor):
     # Already padded
     if c2w.shape[-2] == 4:
@@ -216,3 +217,7 @@ def torch_unique_with_indices_and_inverse(x, dim=0):
     perm = torch.arange(inverse.size(dim), dtype=inverse.dtype, device=inverse.device)
     indices, perm = inverse.flip([dim]), perm.flip([dim])
     return unique, indices.new_empty(unique.size(dim)).scatter_(dim, indices, perm), inverse
+
+
+def lcm(a, b):
+    return abs(a*b) // math.gcd(a, b)

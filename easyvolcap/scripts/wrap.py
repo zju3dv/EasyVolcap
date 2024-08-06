@@ -4,7 +4,8 @@ import subprocess
 
 from easyvolcap.utils.console_utils import *
 
-EASYVOLCAP = 'python -q -X faulthandler easyvolcap/scripts/main.py'
+easyvolcap = f'{dirname(__file__)}/../..'
+EASYVOLCAP = f'python -q -X faulthandler {easyvolcap}/easyvolcap/scripts/main.py'
 
 
 def configurable_entrypoint(SEPERATION='--', LAUNCHER='', EASYVOLCAP=EASYVOLCAP,
@@ -37,11 +38,20 @@ def configurable_entrypoint(SEPERATION='--', LAUNCHER='', EASYVOLCAP=EASYVOLCAP,
 
 def dist_entrypoint():
     # Distribuated training
-    configurable_entrypoint(LAUNCHER='torchrun', EASYVOLCAP='easyvolcap/scripts/main.py', default_launcher_args=['--nproc_per_node', 'auto'], extra_easyvolcap_args=['distributed=True'])
+    configurable_entrypoint(LAUNCHER='torchrun', EASYVOLCAP=f'{easyvolcap}/easyvolcap/scripts/main.py', default_launcher_args=['--nproc_per_node', 'auto'], extra_easyvolcap_args=['distributed=True'])
 
 
 def prof_entrypoint():
     # Profiling
+    if not [s for s in sys.argv if 'runner_cfg.epochs' in s]:
+        sys.argv.append('runner_cfg.epochs=1')
+
+    if not [s for s in sys.argv if 'runner_cfg.ep_iter' in s]:
+        sys.argv.append('runner_cfg.ep_iter=50')
+
+    if not [s for s in sys.argv if 'runner_cfg.eval_ep' in s]:
+        sys.argv.append('runner_cfg.eval_ep=50')
+
     configurable_entrypoint(extra_easyvolcap_args=['profiler_cfg.enabled=True'])
 
 
@@ -62,9 +72,6 @@ def gui_entrypoint():
     if '-c' not in sys.argv:
         sys.argv.insert(1, '-c')
         sys.argv.insert(2, 'configs/specs/gui.yaml')
-    # else:
-    #     cfg_idx = sys.argv.index('-c') + 1
-    #     sys.argv[cfg_idx] = 'configs/base.yaml,' + sys.argv[cfg_idx]
 
     configurable_entrypoint(EASYVOLCAP=EASYVOLCAP + ' ' + '-t gui')
 
@@ -74,10 +81,13 @@ def ws_entrypoint():
     if '-c' not in sys.argv:
         sys.argv.insert(1, '-c')
         sys.argv.insert(2, 'configs/base.yaml')
-    # else:
-    #     cfg_idx = sys.argv.index('-c') + 1
-    #     sys.argv[cfg_idx] = 'configs/base.yaml,' + sys.argv[cfg_idx]
 
     args = sys.argv
-    args = ['python -q -X faulthandler easyvolcap/scripts/client.py'] + args[1:]
+    args = [f'python -q -X faulthandler {easyvolcap}/easyvolcap/scripts/client.py'] + args[1:]
+    subprocess.call(' '.join(args), shell=True)
+
+
+def sig_entrypoint():
+    args = sys.argv
+    args = [f'python -q -X faulthandler {easyvolcap}/easyvolcap/scripts/sigusr1.py'] + args[1:]
     subprocess.call(' '.join(args), shell=True)

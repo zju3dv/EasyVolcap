@@ -1,0 +1,104 @@
+# Changelog
+
+## 2024.04.07 - 2024.08.06
+
+- Fix `.vscode/launch.json` template for newer versions
+- More examplified dataset configurations
+- More specific configurations for networks
+- More documentation on installation
+- Change the recommended invokation method from `evc -t xxx` to `evc-xxx`, for example: `evc-gui`
+- Better dataset management
+  - Better ratio / scaling managemnet
+  - Supports a COLMAP undistorter, which somehow works better for COLMAP camera parameters. Myths.
+  - Add support for disk-based dataset
+    - Yes, originally we only supported RAM-based dataset, which took a long while to load during every training start
+- Better importing system
+  - Note that missing imports are not considered fatal since we'll include all module files, some of which might have optional dependencies
+  - Instead, only a warning for those specific modules are put our
+  - However, if you later try to use these modules, a fatal error will be raised
+- Faster real-time viewer
+  - Removing unnecessary data passing between CPU and GPU
+  - Better time management for the GUI
+- Better entry points
+  - Warn user of duplicate EasyVolcap installation
+  - Better commandline interfacese
+  - Fixing some entry point definitions in the `wrap.py` file
+- Better config system
+  - Will now support fully installed easyvolcap + local configurations
+  - Since we'll not only search `easyvolcap/configs`, but also `./configs`
+- Updated to MIT License for all our own code
+- Implemented a faster fused Adam: `MyFusedAdam`
+  - I don't know why the PyTorch version of the fused adam is even slower than a regular Adam
+  - This operation also introduces the logic for compiling CUDA extensions silently in the codebase
+  - Very handy since we're doing massively parallelized work
+- Implemented a mechanism for clearing the host memory for PyTorch: `easyvolcap/utils/host_utils.py`
+  - See also: https://github.com/pytorch/pytorch/issues/68114
+  - See also: https://github.com/pytorch/pytorch/issues/106606
+- Fix some typos for `frustum`
+- Better supervisors
+  - Now supervisors are modulized and can be chained together using the `SequentialSupervisor`
+  - You get the `output` and `batch` for computing loss in any supervisors
+  - Add a windowed SSIM implementation inspired by 3DGS
+- More performance model function
+  - The handling of camera parameters is more optimized for real-time operations
+- Adds a `CustomViewer` class that can be easily inherited to use the viewer of EasyVolcap
+  - Implemented a few dummy objects to make this happen since we originally only supported in house algorithms
+  - Now you can totally do something like in `tests/custom_gui_tests.py`
+- Better visualization
+  - Fixed some bugs related to the visualizer's thread pool
+  - Add option for generating videos using a different backend, libx265 produces the best and smallest file but CUDA might be faster
+- Better training control
+  - Added a mechanism in `VolumetricVideoRunner` to pause the training and open up a debugger
+  - Just run `evc-sig -h` to check out the options
+  - We use the signal mechanism to achieve this
+  - Now, during training of very large models, if you're feeling insecure or something wrong with the model saving code happens (disk failure?)
+  - You can just manually same the model to another location without losing hours of training progress
+- Added new mechanism for async data preprocessing on other streams
+  - This is exposed as the `prepare_params` method for every network modules
+  - This method will be called at the same time as the backward pass
+  - Thus if there're some data copy operations, it can overlap with the GPU compute happening in the backward pass
+  - Note that asynchronously copying to CPU might corrupt the PyTorch state, leading to weird undefined behavior
+  - Explicit synchronization doesn't help, I'm guessing PyTorch bugs
+- Fix bugs in the viewer
+  - Fix bugs related to t sampling
+  - Fix bugs related to frame index computation
+- Add a WebSocket viewer that allows you to render on the server and view the content locally
+  - The server is run like a regular gui, only appending the config `configs/specs/server.yaml`
+  - The client is invoked as `evc-ws` or additionally with other parameters like shown in `evc-ws -h`
+- Adding a custom cache type for numpy arrays
+- Adding some custom data type conversion logic between PyTorch tensors and numpy arrays
+- Better loggin system
+  - Now with more customizations, check out `console_utils.py`
+  - Now, by default, there're much less clutter for modules in the logs
+  - Making it easier to use for smaller operations
+- Better scripting system
+  - A new scripting argument system introduced by the function `build_parser`
+  - This can be used like `args = dotdict(vars(build_parser(args, description=__doc__).parse_args()))`
+  - Define the parameters in a dict called args, and we'll handle the colorization and help messages
+- Better utility functions for saving and loading point clouds
+- Better utility functions for saving and loading images
+- Better utility scripts for point cloud, COLMAP and IBR preprocessing
+- Support for a faster gaussian rasterizer: https://github.com/dendenxu/fast-gaussian-rasterization
+- More optimized 3DGS model
+- Better timing utilities
+  - Faster timer
+  - Add the ability to store recorded time onto a file
+  - And maybe perform further processing of it (like exporting a plot to see trends)
+- Add the ability to directly load a 3DGS model from a regular PLY file
+- Add better warning messages for splat files
+- More streamlined metric computation system
+  - Now the metrics used are the same as the loss functions for training networks
+  - You can select the type of LPIPS, alex (better for training) or vgg (better for validation, slow, memory hungry)
+- Fix some strange slowness caused by `torch.jit.script`
+- Better network loading and saving procedure
+- Add support for the RealityCapture software that recently became free to use and can be much faster than COLMAP
+- Reform all utility functions for easier control and imports
+- Better documentation
+- Fix the `colmap_to_easyvolcap.py`, `easyvolcap_to_colmap` and `easymocap_to_colmap` scripts
+- Add script for computing camera alignment
+- Add support for `glomap` in the `run_colmap.py` script
+- Add a standalone script for camera undistortion: `undistort.py`
+- Fix bugs for Google Drive batch upload
+- Add a script for compressing images
+- Better script for extracting images from videos
+- Add some more tests

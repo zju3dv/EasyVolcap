@@ -6,7 +6,7 @@ from torch.nn import functional as F
 from easyvolcap.engine import SUPERVISORS
 from easyvolcap.engine.registry import call_from_cfg
 from easyvolcap.utils.console_utils import *
-from easyvolcap.utils.loss_utils import compute_planes_tv, compute_time_planes_smooth
+from easyvolcap.utils.loss_utils import compute_planes_tv, compute_time_planes_smooth, l2_reg
 from easyvolcap.models.supervisors.volumetric_video_supervisor import VolumetricVideoSupervisor
 
 
@@ -17,6 +17,7 @@ class TemporalSupervisor(VolumetricVideoSupervisor):
                  tv_loss_weight: float = 0.0,  # total variation loss for kplanes
                  time_smooth_weight: float = 0.0,  # time smooth weight
                  time_smooth_prop_weight: float = 0.0,  # time smooth propasal weight
+                 t_resd_loss_weight: float = 0.0,  # time residual should be small
 
                  **kwargs,
                  ):
@@ -25,6 +26,7 @@ class TemporalSupervisor(VolumetricVideoSupervisor):
         self.tv_loss_weight = tv_loss_weight
         self.time_smooth_weight = time_smooth_weight
         self.time_smooth_prop_weight = time_smooth_prop_weight
+        self.t_resd_loss_weight = t_resd_loss_weight
 
     def compute_loss(self, output: dotdict, batch: dotdict, loss: torch.Tensor, scalar_stats: dotdict, image_stats: dotdict):
         # Compute the actual loss here
@@ -50,5 +52,10 @@ class TemporalSupervisor(VolumetricVideoSupervisor):
                 time_smooth_loss = compute_time_planes_smooth(net.xyzt_embedder.temporal_embedding)
             scalar_stats.time_smooth_prop_loss = time_smooth_loss
             loss += self.time_smooth_prop_weight * time_smooth_loss
+
+        if self.t_resd_loss_weight > 0 and 't_resd' in output:
+            t_resd_loss = l2_reg(output.t_resd)
+            scalar_stats.t_resd_loss = t_resd_loss
+            loss += self.t_resd_loss_weight * t_resd_loss
 
         return loss

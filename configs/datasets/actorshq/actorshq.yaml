@@ -10,7 +10,7 @@ val_dataloader_cfg:
         <<: *dataset_cfg
         frame_sample: [0, null, 100]
     sampler_cfg:
-        view_sample: [0, 160, 30]
+        view_sample: [0, 160, 1]
 
 model_cfg:
     sampler_cfg:

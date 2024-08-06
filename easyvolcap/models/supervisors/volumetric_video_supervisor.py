@@ -20,6 +20,7 @@ class VolumetricVideoSupervisor(VolumetricVideoModule):
                  ssim_loss_weight: float = 0.0,  # 3dgs ssim loss
                  msssim_loss_weight: float = 0.0,  # 3dgs msssim loss
                  dtype: Union[str, torch.dtype] = torch.float,
+                 ssim_win_size: int = 11,
 
                  **kwargs,
                  ):
@@ -33,12 +34,13 @@ class VolumetricVideoSupervisor(VolumetricVideoModule):
         self.perc_loss_weight = perc_loss_weight
         self.ssim_loss_weight = ssim_loss_weight
         self.msssim_loss_weight = msssim_loss_weight
+        self.ssim_win_size = ssim_win_size
 
     def compute_image_loss(self, rgb_map: torch.Tensor, rgb_gt: torch.Tensor,
                            bg_color: torch.Tensor, msk_gt: torch.Tensor,
                            H: int, W: int,
                            type=ImgLossType.HUBER,
-                           **kwargs,):
+                           **kwargs):
         rgb_gt = rgb_gt + bg_color * (1 - msk_gt)  # MARK: modifying gt for supervision
         rgb_gt, rgb_map = rgb_gt[:, :H * W], rgb_map[:, :H * W]
 
@@ -48,26 +50,34 @@ class VolumetricVideoSupervisor(VolumetricVideoModule):
         psnr = (1 / mse.clip(1e-10)).log() * 10 / np.log(10)
 
         if type == ImgLossType.PERC:
-            rgb_gt = rgb_gt.view(-1, H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
-            rgb_map = rgb_map.view(-1, H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
-            img_loss = lpips(rgb_map, rgb_gt)
-        elif type == ImgLossType.CHARB: img_loss = (resd_sq + 0.001 ** 2).sqrt().mean()
-        elif type == ImgLossType.HUBER: img_loss = huber(rgb_map, rgb_gt)
-        elif type == ImgLossType.L2: img_loss = mse
-        elif type == ImgLossType.L1: img_loss = l1(rgb_map, rgb_gt)
+            rgb_gt = rgb_gt.view(rgb_gt.shape[0], H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
+            rgb_map = rgb_map.view(rgb_map.shape[0], H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
+            if H >= 32 and W >= 32: img_loss = lpips(rgb_map, rgb_gt, **kwargs)
+            else: img_loss = 0
+        elif type == ImgLossType.CHARB:
+            img_loss = (resd_sq + 0.001 ** 2).sqrt().mean()
+        elif type == ImgLossType.HUBER:
+            img_loss = huber(rgb_map, rgb_gt, **kwargs)
+        elif type == ImgLossType.L2:
+            img_loss = mse
+        elif type == ImgLossType.L1:
+            img_loss = l1(rgb_map, rgb_gt, **kwargs)
         elif type == ImgLossType.SSIM:
-            rgb_gt = rgb_gt.view(-1, H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
-            rgb_map = rgb_map.view(-1, H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
-            img_loss = 1. - ssim(rgb_map, rgb_gt)
+            rgb_gt = rgb_gt.view(rgb_gt.shape[0], H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
+            rgb_map = rgb_map.view(rgb_map.shape[0], H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
+            if H >= 11 and W >= 11: img_loss = 1. - ssim(rgb_map, rgb_gt, **kwargs)
+            else: img_loss = 0
         elif type == ImgLossType.MSSSIM:
-            rgb_gt = rgb_gt.view(-1, H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
-            rgb_map = rgb_map.view(-1, H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
-            img_loss = 1. - msssim(rgb_map, rgb_gt)
+            rgb_gt = rgb_gt.view(rgb_gt.shape[0], H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
+            rgb_map = rgb_map.view(rgb_map.shape[0], H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
+            if H >= 11 and W >= 11: img_loss = 1. - msssim(rgb_map, rgb_gt, **kwargs)
+            else: img_loss = 0
         elif type == ImgLossType.WL1:
-            rgb_gt = rgb_gt.view(-1, H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
-            img_loss_wet = kwargs['img_loss_wet'].view(-1, H, W, 1).permute(0, 3, 1, 2)
-            rgb_map = rgb_map.view(-1, H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
-            img_loss = wl1(rgb_map, rgb_gt, img_loss_wet)
+            img_loss_wet = kwargs.pop('img_loss_wet')
+            rgb_gt = rgb_gt.view(rgb_gt.shape[0], H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
+            img_loss_wet = img_loss_wet.view(img_loss_wet.shape[0], H, W, 1).permute(0, 3, 1, 2)
+            rgb_map = rgb_map.view(rgb_map.shape[0], H, W, 3).permute(0, 3, 1, 2)  # B, C, H, W
+            img_loss = wl1(rgb_map, rgb_gt, img_loss_wet, **kwargs)
         else: raise NotImplementedError
 
         return psnr, img_loss
@@ -91,6 +101,7 @@ class VolumetricVideoSupervisor(VolumetricVideoModule):
                 H, W = batch.meta.patch_h[0].item(), batch.meta.patch_w[0].item()
             else:
                 H, W = batch.meta.H[0].item(), batch.meta.W[0].item()
+
             _, perc_loss = compute_image_loss(output.rgb_map, batch.rgb, output.bg_color, batch.msk, H, W, type=ImgLossType.PERC)
             scalar_stats.perc_loss = perc_loss
             loss += self.perc_loss_weight * perc_loss
@@ -103,7 +114,7 @@ class VolumetricVideoSupervisor(VolumetricVideoModule):
             else:
                 H, W = batch.meta.H[0].item(), batch.meta.W[0].item()
 
-            _, ssim_loss = compute_image_loss(output.rgb_map, batch.rgb, output.bg_color, batch.msk, H, W, type=ImgLossType.SSIM)
+            _, ssim_loss = compute_image_loss(output.rgb_map, batch.rgb, output.bg_color, batch.msk, H, W, type=ImgLossType.SSIM, win_size=self.ssim_win_size)
             scalar_stats.ssim_loss = ssim_loss
             loss += self.ssim_loss_weight * ssim_loss
 
@@ -115,7 +126,7 @@ class VolumetricVideoSupervisor(VolumetricVideoModule):
             else:
                 H, W = batch.meta.H[0].item(), batch.meta.W[0].item()
 
-            _, msssim_loss = compute_image_loss(output.rgb_map, batch.rgb, output.bg_color, batch.msk, H, W, type=ImgLossType.MSSSIM)
+            _, msssim_loss = compute_image_loss(output.rgb_map, batch.rgb, output.bg_color, batch.msk, H, W, type=ImgLossType.MSSSIM, win_size=self.ssim_win_size)
             scalar_stats.msssim_loss = msssim_loss
             loss += self.msssim_loss_weight * msssim_loss
 

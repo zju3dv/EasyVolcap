@@ -94,9 +94,23 @@ class VolumetricVideoModule(nn.Module):
             else: batch = kwargs.pop('batch', dotdict())
             self.forward(batch)
             return None, None, None, None
+
+        def render(self, *args, **kwargs):
+            sample(self, *args, **kwargs)
+            return None
+
+        def compute(self, *args, **kwargs):
+            sample(self, *args, **kwargs)
+            return None, None
+
+        def supervise(self, *args, **kwargs):
+            sample(self, *args, **kwargs)
+            return None, None, None
+
         if not hasattr(self, 'sample'): self.sample = MethodType(sample, self)
-        if not hasattr(self, 'render'): self.render = MethodType(sample, self)
-        if not hasattr(self, 'compute'): self.compute = MethodType(sample, self)
+        if not hasattr(self, 'render'): self.render = MethodType(render, self)
+        if not hasattr(self, 'compute'): self.compute = MethodType(compute, self)
+        if not hasattr(self, 'supervise'): self.supervise = MethodType(supervise, self)
 
     def render_imgui(self, viewer: 'VolumetricVideoViewer', batch: dotdict):
         if hasattr(super(), 'render_imgui'):
@@ -222,7 +236,7 @@ class MLP(GradientModule):
             if i == D:
                 O = out_ch
             self.linears.append(nn.Linear(I, O, dtype=dtype))
-        self.linears = nn.ModuleList(self.linears)
+        self.linears: nn.ModuleList[nn.Linear] = nn.ModuleList(self.linears)
         self.actvn = get_function(actvn) if isinstance(actvn, str) else actvn
         self.out_actvn = get_function(out_actvn) if isinstance(out_actvn, str) else out_actvn
 
@@ -293,6 +307,7 @@ def load_pretrained(model_dir: str, resume: bool = True, epoch: int = -1, ext: s
         if warn_if_not_exist:
             log(red(f'Pretrained network: {blue(model_dir)} does not exist'))
         return None, None
+
     if isdir(model_dir):
         pts = [
             int(pt.split('.')[0]) for pt in os.listdir(model_dir) if pt != f'latest{ext}' and pt.endswith(ext) and pt.split('.')[0].isnumeric()
@@ -309,6 +324,11 @@ def load_pretrained(model_dir: str, resume: bool = True, epoch: int = -1, ext: s
         model_path = join(model_dir, f'{pt}{ext}')
     else:
         model_path = model_dir
+
+    if not exists(model_path):
+        if warn_if_not_exist:
+            log(red(f'Pretrained network: {blue(model_path)} does not exist'))
+        return None, None
 
     if ext == '.pt' or ext == '.pth':
         pretrained = dotdict(torch.load(model_path, 'cpu'))
@@ -333,9 +353,9 @@ def load_model(
     skips: List[str] = [],
     only: List[str] = [],
     allow_mismatch: List[str] = [],
+    ext='.pt',
 ):
-
-    pretrained, model_path = load_pretrained(model_dir, resume, epoch, '.pt',
+    pretrained, model_path = load_pretrained(model_dir, resume, epoch, ext,
                                              remove_if_not_resuming=True,
                                              warn_if_not_exist=False)
     if pretrained is None: return 0
@@ -368,8 +388,11 @@ def load_model(
     if optimizer is not None and 'optimizer' in pretrained.keys(): optimizer.load_state_dict(pretrained['optimizer'])
     if scheduler is not None and 'scheduler' in pretrained.keys(): scheduler.load_state_dict(pretrained['scheduler'])
     if moderator is not None and 'moderator' in pretrained.keys(): moderator.load_state_dict(pretrained['moderator'])
-    log(f'Loaded model {blue(model_path)} at epoch {blue(pretrained["epoch"])}')
-    return pretrained['epoch'] + 1
+
+    epoch = pretrained['epoch']
+    if isinstance(epoch, torch.Tensor) or isinstance(epoch, np.ndarray): epoch = epoch.item()
+    log(f'Loaded model {blue(model_path)} at epoch {blue(epoch)}')
+    return epoch + 1
 
 
 def load_network(
@@ -433,8 +456,11 @@ def load_network(
             setattr(model_parent, last_name, nn.Parameter(pretrained_parent[last_name], requires_grad=getattr(model_parent, last_name).requires_grad))  # just replace without copying
 
     (model if not isinstance(model, DDP) else model.module).load_state_dict(pretrained_model, strict=strict)
-    log(f'Loaded network {blue(model_path)} at epoch {blue(pretrained["epoch"])}')
-    return pretrained["epoch"] + 1
+
+    epoch = pretrained['epoch']
+    if isinstance(epoch, torch.Tensor) or isinstance(epoch, np.ndarray): epoch = epoch.item()
+    log(f'Loaded network {blue(model_path)} at epoch {blue(epoch)}')
+    return epoch + 1
 
 
 def save_npz(model: nn.Module,

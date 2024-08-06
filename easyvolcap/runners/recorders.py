@@ -7,7 +7,7 @@ from copy import copy, deepcopy
 from torch.utils.tensorboard import SummaryWriter  # caffe2 requirements for writing images?
 # from tensorboardX import SummaryWriter
 
-from easyvolcap.engine import cfg
+from easyvolcap.engine import cfg, args
 from easyvolcap.engine import RECORDERS
 from easyvolcap.engine.config import WithoutKey
 from easyvolcap.utils.base_utils import dotdict, default_dotdict
@@ -77,8 +77,8 @@ class TensorboardRecorder:
         # We call this thing (writing tensorbaord logs) a recorder instead of logger to differentiate between this and the command line logger
 
         # Remove previous recordings for this experiment
-        if not resume:
-            if os.path.isdir(record_dir) and len(os.listdir(record_dir)):  # only inform the use if there are files
+        if not resume and args.type == 'train':
+            if isdir(record_dir) and len(os.listdir(record_dir)):  # only inform the use if there are files
                 # log(red(f'Removing training record: {blue(record_dir)}'))
                 try: run('rm -r {}'.format(record_dir), quite=not verbose)
                 except: pass
@@ -110,7 +110,7 @@ class TensorboardRecorder:
         # updates internal data structures
         # self.scalar_stats.clear() # for saving running average (ema)
         for k, v in scalar_stats.items():
-            if isinstance(v, float):
+            if isinstance(v, float) and isinstance(self.scalar_stats[k], SmoothedValue):
                 self.scalar_stats[k].update(v)  # no annotations?
             else:
                 self.scalar_stats[k] = v
@@ -154,11 +154,10 @@ class TensorboardRecorder:
         log_stats.iter = str(self.iter)
         for k, v in self.scalar_stats.items():
             if isinstance(v, SmoothedValue):
-                log_stats[k] = f'{v.avg:.6f}'
-            elif isinstance(v, float):
-                log_stats[k] = f'{v:.6f}'
-            else:
-                log_stats[k] = str(v)
+                if 'ratio' in k: log_stats[k] = f'{v.avg:.4f}'
+                else: log_stats[k] = f'{v.avg:.6f}'
+            elif isinstance(v, float): log_stats[k] = f'{v:.6f}'
+            else: log_stats[k] = str(v)
         log_stats.lr = f'{self.scalar_stats.lr.val:.6f}'
         log_stats.data = f'{self.scalar_stats.data.val:.4f}'
         log_stats.batch = f'{self.scalar_stats.batch.val:.4f}'

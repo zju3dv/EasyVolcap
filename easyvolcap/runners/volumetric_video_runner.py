@@ -4,9 +4,12 @@
 # Sometimes performs validation and also writes things to tensorboard
 
 # For type annotation
+import gc
 import time
 import torch
+import signal
 import datetime
+import platform
 
 from easyvolcap.engine import cfg, args  # need this for initialization?
 from easyvolcap.runners.schedulers import ExponentialLR
@@ -55,16 +58,21 @@ class VolumetricVideoRunner:  # a plain and simple object controlling the traini
                  empty_cache_ep: int = 1e10,  # neven empty cache
                  save_latest_ep: int = 1,  # just in case, save regularly
                  log_interval: int = 1,  # 10ms, tune this if in realtime
+                 empty_cache_interval: int = 1e10,  # MARK: SLOW
+                 host_empty_cache_interval: int = 1e10,  # MARK: SLOW
                  record_interval: int = 1,  # ?ms, tune this if in realtime
                  torch_vram_frac_limit: float = 1.0,
+                 parallel_dataloading: bool = True,
                  strict: bool = True,  # strict loading of network and modules?
 
                  resume: bool = True,
                  test_only: bool = False,
                  exp_name: str = cfg.exp_name,  # name of the experiment
                  pretrained_model: str = '',  # load this model first
+                 pretrained_model_ext: str = '.pt',  # ['.pt', '.npz']
                  trained_model: str = f'data/trained_model/{cfg.exp_name}',  # MARK: global configuration
                  load_epoch: int = -1,  # load different epoch to start with
+                 reset_ep: int = 1e9,  # reset the training generator every x epoches
 
                  clip_grad_norm: float = -1,  # 1e-3,
                  clip_grad_value: float = -1,  # 40.0,
@@ -88,6 +96,7 @@ class VolumetricVideoRunner:  # a plain and simple object controlling the traini
                  collect_timing: bool = False,  # will lose 1 fps over copying
                  timer_sync_cuda: bool = True,  # will explicitly call torch.cuda.synchronize() before collecting
                  timer_record_to_file: bool = False,  # will write to a json file for collected analysis of the timing
+                 debug_first_iter: bool = False,
                  ):
         self.model = model  # possibly already a ddp model?
 
@@ -110,16 +119,21 @@ class VolumetricVideoRunner:  # a plain and simple object controlling the traini
         self.eval_ep = eval_ep
         self.save_ep = save_ep
         self.save_lim = save_lim
+        self.reset_ep = reset_ep
         self.empty_cache_ep = empty_cache_ep
         self.save_latest_ep = save_latest_ep
         self.log_interval = log_interval
         self.record_interval = record_interval
+        self.empty_cache_interval = empty_cache_interval
+        self.host_empty_cache_interval = host_empty_cache_interval
+        self.parallel_dataloading = parallel_dataloading
 
         self.resume = resume
         self.strict = strict
         self.load_epoch = load_epoch
         self.trained_model = trained_model
         self.pretrained_model = pretrained_model
+        self.pretrained_model_ext = pretrained_model_ext
 
         self.clip_grad_norm = clip_grad_norm
         self.clip_grad_value = clip_grad_value
@@ -158,6 +172,13 @@ class VolumetricVideoRunner:  # a plain and simple object controlling the traini
         self.collect_timing = collect_timing  # another fancy self.timer (different from fps counter)
         self.timer_sync_cuda = timer_sync_cuda  # this enables accurate time recording for each section, but would slow down the programs
         self.timer_record_to_file = timer_record_to_file
+        self.debugging_signal_received = debug_first_iter
+
+        def signal_handler(signum, frame):
+            self.debugging_signal_received = True
+            log(yellow(f"Received debugging signal: {signum}, marking for breakpoint: {self.debugging_signal_received}"))
+
+        signal.signal(signal.SIGUSR1 if os.name != 'nt' else signal.SIGBREAK, signal_handler)
 
     @property
     def collect_timing(self):
@@ -215,8 +236,10 @@ class VolumetricVideoRunner:  # a plain and simple object controlling the traini
                                scheduler=self.scheduler,
                                moderator=self.moderator,
                                model_dir=self.pretrained_model,
+                               ext=self.pretrained_model_ext,
                                strict=self.strict,
                                )  # loads the next epoch to use
+
         epoch = load_model(model=self.model,
                            optimizer=self.optimizer,
                            scheduler=self.scheduler,
@@ -296,7 +319,7 @@ class VolumetricVideoRunner:  # a plain and simple object controlling the traini
         for epoch in range(epoch, self.epochs):
 
             # Possible to make this a decorator?
-            next(train_generator)  # avoid reconstruction of the dataloader
+            next(train_generator, None)  # avoid reconstruction of the dataloader
 
             # Leave some breathing room for other applications
             if (epoch + 1) % self.empty_cache_ep == 0:
@@ -338,11 +361,12 @@ class VolumetricVideoRunner:  # a plain and simple object controlling the traini
                     if not self.ignore_eval_error:
                         raise e
 
-    def train_epoch(self, epoch: int):
-        train_generator = self.train_generator(epoch, self.ep_iter)
-        for _ in train_generator: pass  # the actual calling
+            if (epoch + 1) % self.reset_ep == 0:
+                log(green(f'Resetting the training generator'))
+                train_generator = self.train_generator(epoch + 1, self.ep_iter)  # yield every ep iter
 
     # Iteration based runner
+
     def train_generator(self, begin_epoch: int, yield_every: int = 1):
         # Train for one epoch (iterator style)
         # Actual start of the execution
@@ -350,11 +374,32 @@ class VolumetricVideoRunner:  # a plain and simple object controlling the traini
         self.maybe_jit_model()
         self.model.train()  # set the network (model) to training mode (recursive to all modules)
         start_time = time.perf_counter()
-        for index, batch in enumerate(self.dataloader):  # control number of iterations explicitly
-            iter = begin_epoch * self.ep_iter + index  # epoch actually is only for logging here
-            batch = add_iter(batch, iter, self.total_iter)  # is this bad naming
-            batch = to_cuda(batch)  # cpu -> cuda, note that DDP will move all cpu tensors to cuda as well
-            data_time = time.perf_counter() - start_time
+
+        # Overlap backward pass of previous iteration with dataloading of next iteration
+        enumerater = enumerate(self.dataloader)
+        index = 0
+        batch = dotdict()
+        data_stream: torch.cuda.Stream = torch.cuda.Stream() if self.parallel_dataloading else torch.cuda.current_stream()
+
+        # Get next data and start copying
+        with torch.cuda.stream(data_stream):
+            index, flying_batch = next(enumerater, (None, None))
+            if flying_batch is None:
+                flying_batch = dotdict(meta=dotdict(iter=-1))
+            else:
+                flying_batch = add_iter(flying_batch, begin_epoch * self.ep_iter + index, self.total_iter)  # is this bad naming
+                flying_batch = to_cuda(flying_batch)  # cpu -> cuda, note that DDP will move all cpu tensors to cuda as well
+                if hasattr(self.model, 'prepare_params'): self.model.prepare_params(self, flying_batch)  # perform some action on the gradients
+                elif hasattr(self.model, 'module') and hasattr(self.model.module, 'prepare_params'): self.model.module.prepare_params(self, flying_batch)  # perform some action on the gradients
+        torch.cuda.current_stream().wait_stream(data_stream)  # wait for data transfer to finish for the first iteration
+
+        data_time = 0
+        batch_time = 0
+        while flying_batch.meta.iter >= 0:  # control number of iterations explicitly
+            iter = flying_batch.meta.iter.item()
+            batch = flying_batch
+
+            data_time += time.perf_counter() - start_time
             timer.record('data transfer')
 
             # Model forwarding
@@ -365,13 +410,36 @@ class VolumetricVideoRunner:  # a plain and simple object controlling the traini
             scalar_stats: dotdict = output.scalar_stats  # things to report to logger and recorder (all scalars)
             timer.record('model forwarding')
 
-            # Optimization step
+            # Optimizer reset
             if self.retain_last_grad: self.optimizer.zero_grad(set_to_none=True)
+
+            # Backward pass
             self.scaler.scale(loss).backward()  # maybe perform AMP
+            timer.record('model backwarding')
+
+            # Get next data and start copying
+            with torch.cuda.stream(data_stream):
+                index, flying_batch = next(enumerater, (None, None))
+                if flying_batch is None:
+                    flying_batch = dotdict(meta=dotdict(iter=-1))
+                else:
+                    flying_batch = add_iter(flying_batch, begin_epoch * self.ep_iter + index, self.total_iter)  # is this bad naming
+                    flying_batch = to_cuda(flying_batch)  # cpu -> cuda, note that DDP will move all cpu tensors to cuda as well
+                    if hasattr(self.model, 'prepare_params'): self.model.prepare_params(self, flying_batch)  # maybe move parameters to cpu
+                    elif hasattr(self.model, 'module') and hasattr(self.model.module, 'prepare_params'): self.model.module.prepare_params(self, flying_batch)  # perform some action on the gradients
+            timer.record('data preparation')
+
+            # Make sure the data transfer is finished for following calls
+            torch.cuda.current_stream().wait_stream(data_stream)  # wait for data transfer to finish, the backward pass should be slow enough # MARK: STREAM SYNC
+
+            # Decorate gradient
             if self.clip_grad_norm > 0: torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad_norm)
             if self.clip_grad_value > 0: torch.nn.utils.clip_grad_value_(self.model.parameters(), self.clip_grad_value)
-            if hasattr(self.model, 'decorate_grad'): self.model.decorate_grad(self, batch)  # perform some action on the gradients
-            elif hasattr(self.model, 'module') and hasattr(self.model.module, 'decorate_grad'): self.model.module.decorate_grad(self, batch)  # perform some action on the gradients
+            if hasattr(self.model, 'decorate_grads'): self.model.decorate_grads(self, batch)  # perform some action on the gradients
+            elif hasattr(self.model, 'module') and hasattr(self.model.module, 'decorate_grads'): self.model.module.decorate_grads(self, batch)  # perform some action on the gradients
+            timer.record('decorating gradients')
+
+            # Optimization step
             self.scaler.step(self.optimizer)
             if not self.retain_last_grad: self.optimizer.zero_grad(set_to_none=True)
             self.scheduler.step()
@@ -379,10 +447,33 @@ class VolumetricVideoRunner:  # a plain and simple object controlling the traini
             self.scaler.update()
             timer.record('optimization step')
 
+            # Final parameter update
+            if hasattr(self.model, 'decorate_params'): self.model.decorate_params(self, batch)  # perform some action on the gradients
+            elif hasattr(self.model, 'module') and hasattr(self.model.module, 'decorate_params'): self.model.module.decorate_params(self, batch)  # perform some action on the gradients
+
+            # Make sure the data transfer is finished for following calls
+            data_stream.wait_stream(torch.cuda.current_stream())  # wait for update params to finish for the data stream # MARK: STREAM SYNC
+            timer.record('decorating parameters')
+
+            if self.debugging_signal_received:
+                breakpoint()
+                self.debugging_signal_received = False
+
             # Records data and batch forwarding time
             end_time = time.perf_counter()
-            batch_time = end_time - start_time
+            batch_time += end_time - start_time
             start_time = end_time  # note that all logging and profiling time are accumuated into data_time
+            if (iter + 1) % self.empty_cache_interval == 0 and (iter + 1) % self.log_interval == 0:
+                # Free as much memory as we can
+                log(green(f'Emptying device memory cache'))
+                torch.cuda.empty_cache()
+
+            if (iter + 1) % self.host_empty_cache_interval == 0 and (iter + 1) % self.log_interval == 0:
+                # Free as much memory as we can
+                from easyvolcap.utils.host_utils import host_empty_cache
+                log(green(f'Emptying host memory cache'))
+                host_empty_cache()
+
             if (iter + 1) % self.log_interval == 0 and not get_rank():
 
                 # For recording onto the tensorboard
@@ -391,14 +482,17 @@ class VolumetricVideoRunner:  # a plain and simple object controlling the traini
                         k: (v.mean().item() if isinstance(v, torch.Tensor) or isinstance(v, np.ndarray) else v)
                         for k, v in scalar_stats.items()
                     }
-                )  # MARK: sync (for accurate batch time)
+                )  # MARK: SYNC
 
                 lr = self.optimizer.param_groups[0]['lr']  # TODO: skechy lr query, only lr of the first param will be saved
                 max_mem = torch.cuda.max_memory_allocated() / 2**20
-                scalar_stats.data = data_time
-                scalar_stats.batch = batch_time
+                torch.cuda.reset_peak_memory_stats()
+                scalar_stats.data = data_time / self.log_interval
+                scalar_stats.batch = batch_time / self.log_interval
                 scalar_stats.lr = lr
                 scalar_stats.max_mem = max_mem
+                data_time = 0
+                batch_time = 0
 
                 self.recorder.iter = iter
                 self.recorder.epoch = epoch
@@ -435,10 +529,6 @@ class VolumetricVideoRunner:  # a plain and simple object controlling the traini
             profiler_step()  # record a step for the profiler, extracted logic
             timer.record('logging & recording')
 
-    def test_epoch(self, epoch: int):
-        test_generator = self.test_generator(epoch, -1)  # nevel yield (special logic)
-        for _ in test_generator: pass  # the actual calling
-
     def test_generator(self, epoch: int, yield_every: int = 1):
         # validation for one epoch
         self.maybe_jit_model()
@@ -469,3 +559,13 @@ class VolumetricVideoRunner:  # a plain and simple object controlling the traini
         self.recorder.update_scalar_stats(scalar_stats)
         if self.record_images_to_tb: self.recorder.update_image_stats(image_stats)
         self.recorder.record(self.val_dataloader.dataset.split.name)
+        torch.cuda.empty_cache()  # for better memory recording
+        torch.cuda.synchronize()  # wait for all strange copies in the non-training pass to finish
+
+    def train_epoch(self, epoch: int):
+        train_generator = self.train_generator(epoch, self.ep_iter)
+        for _ in train_generator: pass  # the actual calling
+
+    def test_epoch(self, epoch: int):
+        test_generator = self.test_generator(epoch, -1)  # nevel yield (special logic)
+        for _ in test_generator: pass  # the actual calling

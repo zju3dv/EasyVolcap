@@ -1,0 +1,24 @@
+benchmark: False # only perform benchmarking when training
+# deterministic: True # set cudnn backend to deterministic mode
+dataloader_cfg: &dataloader_cfg
+    dataset_cfg:
+        type: VideoFlowDataset
+        flow_mode: forward
+        immask_crop: False
+        imbound_crop: False
+        use_loaded_time: False
+        ddp_shard_dataset: False
+
+val_dataloader_cfg:
+    <<: *dataloader_cfg
+    # FIXME: Now only declaring mask.yaml will not automatically change the validataion dataloader's background color
+
+runner_cfg:
+    visualizer_cfg:
+        types: [RENDER, DEPTH, FLOW]
+
+model_cfg:
+    sampler_cfg:
+        render_mode: flow
+    supervisor_cfg:
+        flow_loss_weight: 0.01

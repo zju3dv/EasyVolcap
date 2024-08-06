@@ -1,0 +1,36 @@
+configs: configs/datasets/selfcap/selfcap.yaml # inherit from this config
+dataloader_cfg:
+    dataset_cfg: &dataset_cfg # cameras_dir: aligned
+        data_root: data/selfcap/0525_corgi_s5200_e8700
+        near: 1.5
+        far: 50.0 # camera near far range, affects ray sampling and some cost volume based algorithms
+        # scene_scale:
+        bounds: [[-20, -2, -3], [15, 3, 20]]
+        # bounds: [[-1.0629, -1.5931, 0.8483], [5.4231, 1.5700, 5.9504]] # for controlling the learning rate
+
+val_dataloader_cfg:
+    dataset_cfg:
+        <<: *dataset_cfg
+
+viewer_cfg:
+    window_size: [1080, 1920]
+    camera_cfg:
+        world_up: [-0.031061, -0.969596, -0.242738]
+        n: 1.5
+        f: 50.0 # camera near far range, affects ray sampling and some cost volume based algorithms
+        origin: [1.943318, -0.109844, 2.050638]
+        R:
+            [
+                [0.9976174758, -0.0067310123, -0.0686590518],
+                [0.0102690837, 0.9986300285, 0.0513089866],
+                [0.0682196294, -0.0518918073, 0.9963198896],
+            ]
+        T: [-1.7671579283, -0.5757687595, 1.3653700154]
+        K:
+            [
+                [1.52748146e+03, 0.00000000e+00, 9.60000000e+02],
+                [0.00000000e+00, 1.52785390e+03, 5.40000000e+02],
+                [0.00000000e+00, 0.00000000e+00, 1],
+            ]
+# python scripts/triangulate_evc.py --data_root /mnt/data/home/xuzhen/datasets/selfcap/0525_corgi_s5200_e8700 --pairs "(('0003','0004'),('0009','0010'),('0018','0019'))" --bounds "[[-1.0629, -1.5931, 0.8483], [5.4231, 1.5700, 5.9504]]" --n_points 18000 --start_idx 0 --end_idx 3500 --jump_idx 1 --output_dir pcds_roma_3p_18k
+# python scripts/points/resample.py --input /mnt/remote/D001/home/xuzhen/datasets/selfcap/0525_corgi_s5200_e8700/dense_xyzs_rc --output /mnt/remote/D001/home/xuzhen/datasets/selfcap/0525_corgi_s5200_e8700/dense_pcds_rc_bbox_180k --n_points 180000 --bounds "[[-1.9, -1.0, -2.0], [3.5, 2.8, 6.3]]" --apply_bounds

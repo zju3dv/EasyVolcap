@@ -1,5 +1,6 @@
 dataloader_cfg:
     dataset_cfg:
+        disk_dataset: False
         cache_raw: True
         n_rays: 128
     batch_sampler_cfg:

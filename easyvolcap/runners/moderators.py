@@ -30,8 +30,8 @@ class NoopModerator:
 class DatasetRatioModerator:
     def __init__(self,
                  runner: "VolumetricVideoRunner",
-                 milestones: List[Tuple[int]] = [(0, 1.0)],
-                 #  milestones: List[Tuple[int]] = [(0, 0.25), (500, 0.5), (1000, 1.0)],
+                 #  milestones: List[Tuple[int]] = [(0, 1.0)],
+                 milestones: List[Tuple[int]] = [(0, 0.25), (500, 0.5), (1000, 1.0)],
                  skip_first: bool = False,  # this will give you an idea of the memory consumption
 
                  total_iter: int = 200000,  # 200k
