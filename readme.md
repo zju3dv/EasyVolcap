@@ -55,7 +55,7 @@ pip install -v -r requirements-devel.txt
 
 Aside from running `git pull`, you might also need to reregister the command lines and code path by running `pip install -e . --no-build-isolation --no-deps` again.
 
-A notable example is when updating to [***4K4D***](https://github.com/zju3dv/4K4D], you're required to rerun the editable install command to use that repository instead of this one.
+A notable example is when updating to [***4K4D***](https://github.com/zju3dv/4K4D), you're required to rerun the editable install command to use that repository instead of this one.
 
 
 ## Examples
